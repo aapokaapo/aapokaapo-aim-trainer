@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -6,10 +7,19 @@ from typing import Optional
 
 import aiohttp
 import uvicorn
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from spnkr.client import HaloInfiniteClient
 from sqlmodel import Field, Session, SQLModel, create_engine, select
+
+# Load environment variables from .env (no-op when already set, e.g. in CI).
+load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-8s %(name)s – %(message)s",
+)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///matches.db")
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
@@ -48,8 +58,20 @@ def create_db_and_tables():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """FastAPI lifespan: initialise DB tables then start the background updater.
+
+    The background task fetches new Halo matches for every player in the
+    database on a configurable interval.  See ``updater.py`` for details.
+    """
     create_db_and_tables()
+
+    # Import here to avoid a circular dependency at module load time.
+    from updater import start_background_task  # noqa: PLC0415
+
+    task = start_background_task(engine)
     yield
+    # Cancel the background task gracefully on shutdown.
+    task.cancel()
 
 
 app = FastAPI(title="Halo Aim Trainer Match Importer", lifespan=lifespan)
