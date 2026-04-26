@@ -95,6 +95,9 @@ async def _update_player(
     """
     logger.info("Updating player: %s (xuid=%s)", player.gamertag, player.xuid)
 
+    # Use the module-level default gamemode for all players.
+    # TODO: Add a per-player ``gamemode`` column to Player and read it here,
+    #       falling back to DEFAULT_GAMEMODE when the column is None.
     gamemode: int = DEFAULT_GAMEMODE
 
     # ------------------------------------------------------------------

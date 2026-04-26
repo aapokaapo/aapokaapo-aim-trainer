@@ -57,9 +57,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Halo Aim Trainer Match Importer", lifespan=lifespan)
 
-_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-app.mount("/static", StaticFiles(directory=os.path.join(_BASE_DIR, "static")), name="static")
-templates = Jinja2Templates(directory=os.path.join(_BASE_DIR, "templates"))
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
+templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 
 # ---------------------------------------------------------------------------
