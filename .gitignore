@@ -1,0 +1,12 @@
+# Database
+matches.db
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Environment
+.env
+venv/
+.venv/
