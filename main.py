@@ -1,4 +1,5 @@
 import json
+import asyncio
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -10,6 +11,23 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from spnkr.client import HaloInfiniteClient
 from sqlmodel import Field, Session, SQLModel, create_engine, select
+
+from spartan_auth import SpartanTokenManager
+
+# Load .env variables (no-op when python-dotenv is unavailable; spartan_auth
+# already attempts the same load at import time).
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass
+
+# Shared token manager instance; initialised lazily on first request so that
+# startup does not fail when Azure credentials are absent (e.g. when
+# SPARTAN_TOKEN is provided directly instead).
+_token_manager: Optional[SpartanTokenManager] = None
+_token_manager_lock = asyncio.Lock()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///matches.db")
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
@@ -117,13 +135,39 @@ async def import_matches(body: ImportRequest):
     spartan_token = os.getenv("SPARTAN_TOKEN")
     clearance_token = os.getenv("CLEARANCE_TOKEN")
 
-    if not spartan_token or not clearance_token:
-        raise HTTPException(
-            status_code=500,
-            detail="SPARTAN_TOKEN and CLEARANCE_TOKEN environment variables must be set.",
-        )
-
     async with aiohttp.ClientSession() as session:
+        # If SPARTAN_TOKEN is not set, obtain it at runtime via the Azure OAuth
+        # flow using credentials from .env (AZURE_CLIENT_ID, AZURE_CLIENT_SECRET,
+        # AZURE_REFRESH_TOKEN, REDIRECT_URI).
+        if not spartan_token:
+            global _token_manager
+            async with _token_manager_lock:
+                if _token_manager is None:
+                    try:
+                        _token_manager = SpartanTokenManager()
+                    except EnvironmentError as exc:
+                        raise HTTPException(
+                            status_code=500,
+                            detail=(
+                                "SPARTAN_TOKEN is not set and Azure OAuth credentials "
+                                f"are incomplete: {exc}"
+                            ),
+                        )
+            try:
+                spartan_tokens = await _token_manager.get_spartan_token(session)
+                spartan_token = spartan_tokens.spartan_token
+            except RuntimeError as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to obtain Spartan token via Azure OAuth: {exc}",
+                )
+
+        if not spartan_token or not clearance_token:
+            raise HTTPException(
+                status_code=500,
+                detail="SPARTAN_TOKEN and CLEARANCE_TOKEN environment variables must be set.",
+            )
+
         client = HaloInfiniteClient(
             session=session,
             spartan_token=spartan_token,
