@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block title %}Search "{{ query }}" – Aapokaapo Aim Trainer{% endblock %}
+
+{% block content %}
+<h2>Search results for "{{ query }}"</h2>
+
+{% if results %}
+<ul class="search-results">
+  {% for p in results %}
+  <li><a href="/player/{{ p.xuid }}">{{ p.gamertag }}</a></li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="empty-state">No players found matching "{{ query }}".</p>
+{% endif %}
+{% endblock %}

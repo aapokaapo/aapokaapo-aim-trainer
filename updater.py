@@ -1,17 +1,16 @@
 """Periodic background task: update match history for all players in the DB.
 
-Every ``UPDATE_INTERVAL_SECONDS`` seconds (default: 300 / 5 minutes) this
-module iterates every :class:`~main.Player` row in the database, fetches new
+Every ``UPDATE_INTERVAL_SECONDS`` seconds (default: 720 / 12 minutes) this
+module iterates every :class:`~models.Player` row in the database, fetches new
 Halo Infinite matches for that player via :mod:`haloclient`, applies selection
 criteria, and persists only the matches that pass those criteria.
 
 Configuration (.env):
     UPDATE_INTERVAL_SECONDS – How often to run the full update cycle
-                               (default: 300).
+                               (default: 720).
     DEFAULT_GAMEMODE         – Fallback ``game_variant_category`` integer used
                                when a player has no ``gamemode`` stored
-                               (default: 9).  See the TODO in the variable
-                               docstring below for how to find the right value.
+                               (default: 9).
 
 Background task lifecycle:
     Call :func:`start_background_task` once inside the FastAPI lifespan to
@@ -28,7 +27,9 @@ from typing import Optional
 import aiohttp
 from sqlmodel import Session, select
 
+from database import add_match, get_all_players, update_player_latest_match
 from haloclient import get_client
+from models import Match, Player
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +37,8 @@ logger = logging.getLogger(__name__)
 # Configuration
 # ---------------------------------------------------------------------------
 
-UPDATE_INTERVAL_SECONDS: int = int(os.getenv("UPDATE_INTERVAL_SECONDS", "300"))
-"""Seconds between full DB update cycles (default: 300 = 5 minutes)."""
+UPDATE_INTERVAL_SECONDS: int = int(os.getenv("UPDATE_INTERVAL_SECONDS", "720"))
+"""Seconds between full DB update cycles (default: 720 = 12 minutes)."""
 
 DEFAULT_GAMEMODE: int = int(os.getenv("DEFAULT_GAMEMODE", "9"))
 """Fallback ``game_variant_category`` value used when the player row carries
@@ -55,17 +56,8 @@ no explicit gamemode.
 def _passes_criteria(match_entry, gamemode: int) -> bool:
     """Return ``True`` if *match_entry* should be stored in the database.
 
-    This function centralises all match-selection logic so that new criteria
-    can be added in one place.
-
     Current criteria:
     1. The match's ``game_variant_category`` must equal *gamemode*.
-
-    # TODO: Add additional aim-trainer specific criteria here, for example:
-    #   - Minimum match duration
-    #   - Specific map or playlist
-    #   - Minimum number of kills / accuracy threshold
-    #   - Exclude unfinished / early-quit matches
 
     Args:
         match_entry: A single result from :meth:`spnkr.stats.get_match_history`.
@@ -84,7 +76,7 @@ def _passes_criteria(match_entry, gamemode: int) -> bool:
 
 async def _update_player(
     client,
-    player,
+    player: Player,
     engine,
 ) -> int:
     """Fetch and persist new matches for a single *player*.
@@ -95,20 +87,14 @@ async def _update_player(
 
     Args:
         client:  An authenticated :class:`~spnkr.HaloInfiniteClient`.
-        player:  A :class:`~main.Player` ORM instance.
+        player:  A :class:`~models.Player` ORM instance.
         engine:  The SQLAlchemy engine used for DB writes.
 
     Returns:
         The number of newly inserted match rows.
     """
-    # Deferred imports avoid a circular-import between main.py and this module.
-    from main import Match  # noqa: PLC0415
-
     logger.info("Updating player: %s (xuid=%s)", player.gamertag, player.xuid)
 
-    # Determine which gamemode to filter.
-    # TODO: If you add a per-player ``gamemode`` column in the future, read it
-    # here and fall back to DEFAULT_GAMEMODE only when it is None.
     gamemode: int = DEFAULT_GAMEMODE
 
     # ------------------------------------------------------------------
@@ -169,29 +155,28 @@ async def _update_player(
     newest_match_id: Optional[str] = str(all_results[0].match_id)
 
     with Session(engine) as db:
-        # Re-fetch inside this session to avoid detached-instance issues.
-        from main import Player  # noqa: PLC0415
         db_player = db.exec(select(Player).where(Player.xuid == player.xuid)).first()
         if db_player is None:
             logger.error("Player %s not found in DB during update – skipping.", player.xuid)
             return 0
 
-        db_player.latest_match_id = newest_match_id
-        db.add(db_player)
+        update_player_latest_match(db, db_player, newest_match_id)
 
         for history_entry, raw_json in match_stats_list:
             mid = str(history_entry.match_id)
-            if db.exec(select(Match).where(Match.match_id == mid)).first():
-                # Already stored (e.g. imported manually via the API endpoint).
+            existing = db.exec(select(Match).where(Match.match_id == mid)).first()
+            if existing:
                 continue
-            match_obj = Match(
+            add_match(
+                db,
                 match_id=mid,
                 player_id=db_player.id,
+                gamemode=gamemode,
+                valid=True,
                 duration=str(history_entry.match_info.duration),
                 played_at=history_entry.match_info.start_time,
                 raw_match_stats=json.dumps(raw_json),
             )
-            db.add(match_obj)
             new_count += 1
 
         db.commit()
@@ -208,24 +193,14 @@ async def _update_player(
 
 
 async def _run_update_cycle(engine) -> None:
-    """Run one full update cycle: refresh all players in the database.
-
-    Acquires a fresh Spartan token at the start of every cycle so the
-    background task remains authenticated across long intervals.
-
-    Args:
-        engine: The SQLAlchemy engine used for DB reads and writes.
-    """
-    # Deferred import to avoid circular dependency with main.py.
-    from main import Player  # noqa: PLC0415
-
-    logger.info("Background update cycle starting…")
+    """Run one full update cycle: refresh all players in the database."""
+    logger.info("Background update cycle starting\u2026")
 
     with Session(engine) as db:
-        players = db.exec(select(Player)).all()
+        players = get_all_players(db)
 
     if not players:
-        logger.info("No players in database – nothing to update.")
+        logger.info("No players in database \u2013 nothing to update.")
         return
 
     async with aiohttp.ClientSession() as session:
@@ -236,9 +211,8 @@ async def _run_update_cycle(engine) -> None:
                     new = await _update_player(client, player, engine)
                     total_new += new
                 except Exception:
-                    # Log and continue so one bad player doesn't abort the cycle.
                     logger.exception(
-                        "Failed to update player %s – continuing with next player.",
+                        "Failed to update player %s \u2013 continuing with next player.",
                         player.gamertag,
                     )
 
@@ -253,15 +227,7 @@ async def _run_update_cycle(engine) -> None:
 
 
 async def _background_loop(engine) -> None:
-    """Infinite asyncio loop that runs :func:`_run_update_cycle` periodically.
-
-    Sleeps for ``UPDATE_INTERVAL_SECONDS`` between each cycle.  Any unhandled
-    exception inside a cycle is caught and logged so the loop never dies
-    silently.
-
-    Args:
-        engine: The SQLAlchemy engine passed through to the update cycle.
-    """
+    """Infinite asyncio loop that runs :func:`_run_update_cycle` periodically."""
     logger.info(
         "Background match updater started (interval: %ds).",
         UPDATE_INTERVAL_SECONDS,
@@ -286,15 +252,6 @@ def start_background_task(engine) -> asyncio.Task:
 
     Returns:
         The scheduled :class:`asyncio.Task`.
-
-    Example (in ``main.py``)::
-
-        @asynccontextmanager
-        async def lifespan(app: FastAPI):
-            create_db_and_tables()
-            task = start_background_task(engine)
-            yield
-            task.cancel()
     """
     return asyncio.create_task(
         _background_loop(engine),

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Match {{ match.match_id[:8] }}… – Aapokaapo Aim Trainer{% endblock %}
+
+{% block content %}
+<h2>Match Details</h2>
+<p class="match-id">ID: <code>{{ match.match_id }}</code></p>
+
+<section class="section">
+  <div class="stats-grid">
+    <div class="stat-card">
+      <span class="stat-label">Player</span>
+      <span class="stat-value">
+        <a href="/player/{{ player.xuid }}">{{ player.gamertag }}</a>
+      </span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Date</span>
+      <span class="stat-value">{{ match.played_at.strftime('%Y-%m-%d %H:%M UTC') }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Duration</span>
+      <span class="stat-value">{{ duration_fmt }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Gamemode</span>
+      <span class="stat-value">{{ match.gamemode }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Score</span>
+      <span class="stat-value">{{ score }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Kills</span>
+      <span class="stat-value">{{ kills }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Deaths</span>
+      <span class="stat-value">{{ deaths }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Assists</span>
+      <span class="stat-value">{{ assists }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Accuracy</span>
+      <span class="stat-value">{{ accuracy }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Valid</span>
+      <span class="stat-value">{% if match.valid %}✅ Yes{% else %}❌ No{% endif %}</span>
+    </div>
+  </div>
+</section>
+
+<p>
+  <a class="btn" href="/player/{{ player.xuid }}">← Back to {{ player.gamertag }}</a>
+</p>
+{% endblock %}

@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}{{ player.gamertag }} – Aapokaapo Aim Trainer{% endblock %}
+
+{% block content %}
+<h2 class="player-name">{{ player.gamertag }}</h2>
+<p class="xuid">XUID: <code>{{ player.xuid }}</code></p>
+
+{% if best_match %}
+<section class="section best-match">
+  <h3>⭐ Best Match</h3>
+  <div class="stats-grid">
+    <div class="stat-card">
+      <span class="stat-label">Date</span>
+      <span class="stat-value">{{ best_match.match.played_at.strftime('%Y-%m-%d') }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Duration</span>
+      <span class="stat-value">{{ best_match.duration_fmt }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Score</span>
+      <span class="stat-value">{{ best_match.score }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Kills</span>
+      <span class="stat-value">{{ best_match.kills }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Deaths</span>
+      <span class="stat-value">{{ best_match.deaths }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Assists</span>
+      <span class="stat-value">{{ best_match.assists }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Accuracy</span>
+      <span class="stat-value">{{ best_match.accuracy }}</span>
+    </div>
+  </div>
+  <a class="btn" href="/match/{{ best_match.match.match_id }}">View match details →</a>
+</section>
+{% endif %}
+
+<section class="section">
+  <h3>📋 Match History</h3>
+  {% if matches %}
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Duration</th>
+        <th>Score</th>
+        <th>Kills</th>
+        <th>Deaths</th>
+        <th>Accuracy</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for ctx in matches %}
+      <tr>
+        <td>{{ ctx.match.played_at.strftime('%Y-%m-%d %H:%M') }}</td>
+        <td>{{ ctx.duration_fmt }}</td>
+        <td>{{ ctx.score }}</td>
+        <td>{{ ctx.kills }}</td>
+        <td>{{ ctx.deaths }}</td>
+        <td>{{ ctx.accuracy }}</td>
+        <td><a href="/match/{{ ctx.match.match_id }}">Details</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty-state">No matches recorded yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

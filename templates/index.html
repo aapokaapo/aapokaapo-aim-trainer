@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}Leaderboard – Aapokaapo Aim Trainer{% endblock %}
+
+{% block content %}
+<section class="section">
+  <h2>🏆 Leaderboard</h2>
+  {% if leaderboard %}
+  <table class="table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Player</th>
+        <th>Matches</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for entry in leaderboard %}
+      <tr>
+        <td class="rank">{{ loop.index }}</td>
+        <td><a href="/player/{{ entry.player.xuid }}">{{ entry.player.gamertag }}</a></td>
+        <td>{{ entry.match_count }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty-state">No players registered yet. Be the first to participate!</p>
+  {% endif %}
+</section>
+
+<section class="section how-to">
+  <h2>🎮 How to Participate</h2>
+  <ol>
+    <li>
+      Play Halo Infinite matches using the designated aim-trainer game mode.
+    </li>
+    <li>
+      Ask an admin to register your gamertag via the
+      <code>POST /import-matches/</code> API endpoint.
+    </li>
+    <li>
+      Your match history will be fetched and updated automatically every
+      12 minutes.
+    </li>
+    <li>
+      Find your name on the leaderboard and click it to view your full
+      match history and personal stats!
+    </li>
+  </ol>
+</section>
+{% endblock %}

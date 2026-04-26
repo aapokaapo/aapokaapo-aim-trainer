@@ -1,0 +1,205 @@
+/* =========================================================
+   Aapokaapo Aim Trainer – base styles
+   ========================================================= */
+
+/* --- Reset & base ---------------------------------------- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  background: #0f1117;
+  color: #e2e8f0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+a { color: #63b3ed; text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+code {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.85em;
+  background: #1e2433;
+  padding: 0.1em 0.4em;
+  border-radius: 4px;
+}
+
+/* --- Header ----------------------------------------------- */
+.site-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem;
+  background: #161b27;
+  border-bottom: 1px solid #2d3748;
+}
+
+.site-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #e2e8f0;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.site-title:hover { color: #90cdf4; text-decoration: none; }
+
+.search-form {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.search-form input[type="search"] {
+  padding: 0.4rem 0.75rem;
+  border: 1px solid #4a5568;
+  border-radius: 6px;
+  background: #1e2433;
+  color: #e2e8f0;
+  font-size: 0.9rem;
+  width: 220px;
+}
+.search-form input[type="search"]::placeholder { color: #718096; }
+
+.search-form button,
+.btn {
+  padding: 0.4rem 0.9rem;
+  border: none;
+  border-radius: 6px;
+  background: #3182ce;
+  color: #fff;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background 0.15s;
+  display: inline-block;
+}
+.search-form button:hover,
+.btn:hover { background: #2b6cb0; text-decoration: none; }
+
+/* --- Main container --------------------------------------- */
+.container {
+  max-width: 900px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+  flex: 1;
+}
+
+/* --- Sections -------------------------------------------- */
+.section {
+  margin-bottom: 2.5rem;
+}
+
+h2 {
+  font-size: 1.6rem;
+  margin-bottom: 1rem;
+  color: #f7fafc;
+}
+
+h3 {
+  font-size: 1.2rem;
+  margin-bottom: 0.75rem;
+  color: #cbd5e0;
+}
+
+/* --- Player heading --------------------------------------- */
+.player-name { margin-bottom: 0.2rem; }
+.xuid { color: #718096; font-size: 0.85rem; margin-bottom: 1.5rem; }
+.match-id { color: #718096; font-size: 0.85rem; margin-bottom: 1.5rem; }
+
+/* --- Tables ---------------------------------------------- */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.table th,
+.table td {
+  padding: 0.6rem 0.9rem;
+  text-align: left;
+  border-bottom: 1px solid #2d3748;
+}
+
+.table thead th {
+  background: #1e2433;
+  color: #a0aec0;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+}
+
+.table tbody tr:hover { background: #1a202c; }
+
+.table td.rank {
+  color: #f6e05e;
+  font-weight: 700;
+  width: 2.5rem;
+  text-align: center;
+}
+
+/* --- Stats grid ------------------------------------------ */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.stat-card {
+  background: #1e2433;
+  border: 1px solid #2d3748;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.stat-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #718096;
+}
+
+.stat-value {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #f7fafc;
+}
+
+/* --- How-to section -------------------------------------- */
+.how-to ol {
+  padding-left: 1.4rem;
+  line-height: 1.9;
+  color: #cbd5e0;
+}
+
+/* --- Search results -------------------------------------- */
+.search-results {
+  list-style: none;
+  padding: 0;
+}
+.search-results li {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #2d3748;
+}
+
+/* --- Empty state ----------------------------------------- */
+.empty-state {
+  color: #718096;
+  font-style: italic;
+  padding: 1rem 0;
+}
+
+/* --- Footer ---------------------------------------------- */
+.site-footer {
+  text-align: center;
+  padding: 1rem;
+  color: #4a5568;
+  font-size: 0.8rem;
+  border-top: 1px solid #2d3748;
+}
