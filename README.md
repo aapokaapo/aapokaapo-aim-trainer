@@ -47,7 +47,7 @@ python main.py
 Or with uvicorn directly:
 
 ```bash
-uvicorn main:app --host 0.0.0.0 --port 8000
+uvicorn main:app --host 0.0.0.0 --port 8045
 ```
 
 ## Environment Variables
@@ -57,7 +57,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 | `AZURE_CLIENT_ID` | *(required)* | Azure AD application (client) ID |
 | `AZURE_CLIENT_SECRET` | *(required)* | Azure AD client secret |
 | `AZURE_REFRESH_TOKEN` | *(required)* | Initial OAuth refresh token (from spnkr setup) |
-| `PUBLIC_BASE_URL` | `http://localhost:8000` | Public URL of the app, used to build the OAuth redirect URI |
+| `PUBLIC_BASE_URL` | `http://localhost:8045` | Public URL of the app, used to build the OAuth redirect URI |
 | `DATABASE_URL` | `sqlite:///matches.db` | SQLAlchemy connection string |
 | `UPDATE_INTERVAL_SECONDS` | `300` | Seconds between automatic background match-sync cycles |
 | `INTER_PLAYER_DELAY_SECONDS` | `2` | Pause (seconds) between syncing consecutive players to respect API rate limits |
