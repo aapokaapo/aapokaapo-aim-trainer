@@ -43,8 +43,9 @@ AZURE_CLIENT_ID = os.environ.get("AZURE_CLIENT_ID", "")
 AZURE_CLIENT_SECRET = os.environ.get("AZURE_CLIENT_SECRET", "")
 API_KEY = os.environ.get("API_KEY", "")
 # PUBLIC_BASE_URL is used to build the OAuth redirect URI.
-# For local dev: http://127.0.0.1:8000  |  for prod: https://aimtrainer.aapokaapostats.site
-PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
+# For local dev: http://127.0.0.1:8045  |  for prod: https://aimtrainer.aapokaapostats.site
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8045").rstrip("/")
+PORT = int(os.environ.get("PORT", 8045))
 
 _MICROSOFT_TENANT = "consumers"  # Xbox Live accounts are Microsoft consumer accounts
 _MICROSOFT_AUTH_URL = f"https://login.microsoftonline.com/{_MICROSOFT_TENANT}/oauth2/v2.0/authorize"
@@ -64,11 +65,9 @@ _STATE_TTL = 600  # 10 minutes
 _leaderboard_cache: dict = {"data": None, "expires_at": 0.0}
 _LEADERBOARD_CACHE_TTL = 60  # seconds — leaderboard is refreshed every 5 min anyway
 
-
 def invalidate_leaderboard_cache() -> None:
     """Reset the leaderboard TTL cache. Called by the updater after each cycle."""
     _leaderboard_cache["expires_at"] = 0.0
-
 
 def _purge_expired_states() -> None:
     now = time.time()
@@ -76,13 +75,11 @@ def _purge_expired_states() -> None:
     for k in expired:
         del _oauth_states[k]
 
-
 # ---------------------------------------------------------------------------
 # Xbox token-exchange helpers
 # ---------------------------------------------------------------------------
 
 _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
-
 
 async def verify_api_key(api_key: str = Security(_api_key_header)) -> None:
     """Dependency that validates the X-API-Key header for write endpoints."""
@@ -97,7 +94,6 @@ async def verify_api_key(api_key: str = Security(_api_key_header)) -> None:
             detail="Invalid or missing API key.",
             headers={"WWW-Authenticate": "ApiKey"},
         )
-
 
 async def _exchange_code_for_token(session: aiohttp.ClientSession, code: str) -> dict:
     """Exchange an OAuth authorization code for a Microsoft access token."""
@@ -115,7 +111,6 @@ async def _exchange_code_for_token(session: aiohttp.ClientSession, code: str) ->
         if resp.status != 200:
             raise RuntimeError(f"Token exchange failed ({resp.status}): {body.get('error_description', body)}")
         return body
-
 
 async def _get_xbl_token(session: aiohttp.ClientSession, ms_access_token: str) -> dict:
     """Exchange a Microsoft access token for an Xbox Live (XBL) user token."""
@@ -135,7 +130,6 @@ async def _get_xbl_token(session: aiohttp.ClientSession, ms_access_token: str) -
             raise RuntimeError(f"XBL auth failed ({resp.status}): {body}")
         return body
 
-
 async def _get_xsts_token(session: aiohttp.ClientSession, xbl_token: str) -> dict:
     """Exchange an XBL token for an XSTS token required by Xbox Live APIs."""
     payload = {
@@ -153,12 +147,11 @@ async def _get_xsts_token(session: aiohttp.ClientSession, xbl_token: str) -> dic
             raise RuntimeError(f"XSTS auth failed ({resp.status}): {body}")
         return body
 
-
 async def _get_xbox_gamertag(
     session: aiohttp.ClientSession, xuid: str, uhs: str, xsts_token: str
 ) -> str:
     """Fetch the gamertag for a given XUID using the Xbox Live profile API."""
-    auth_header = f"XBL3.0 x={uhs};{xsts_token}"
+    auth_header = f"XBL3.0 x={{uhs}};{{xsts_token}}"
     headers = {
         "Authorization": auth_header,
         "x-xbl-contract-version": "2",
@@ -177,7 +170,6 @@ async def _get_xbox_gamertag(
     except (KeyError, IndexError) as exc:
         raise RuntimeError(f"Failed to parse Xbox profile response: {exc}") from exc
 
-
 def create_db_and_tables():
     # Because models.py is imported, SQLModel knows about the tables
     SQLModel.metadata.create_all(engine)
@@ -191,7 +183,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Halo Aim Trainer Match Importer", lifespan=lifespan)
 
-
 # ---------------------------------------------------------------------------
 # Request / Response schemas
 # ---------------------------------------------------------------------------
@@ -201,24 +192,20 @@ class MatchOut(BaseModel):
     duration: str
     played_at: datetime
 
-
 class PlayerOut(BaseModel):
     xuid: str
     gamertag: str
     latest_match_id: Optional[str]
     matches: list[MatchOut]
 
-
 class PlayerSearchRequest(BaseModel):
     gamertag: str
-
 
 class LeaderboardEntry(BaseModel):
     rank: int
     gamertag: str
     duration: str
     played_at: datetime
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -237,17 +224,14 @@ def _player_out(db: Session, player: Player) -> PlayerOut:
         ],
     )
 
-
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
-
 
 @app.get("/", response_class=FileResponse)
 async def serve_frontend():
     """Serves the leaderboard as the index page."""
     return FileResponse("leaderboard.html")
-
 
 @app.get("/api/status")
 async def get_system_status():
@@ -256,17 +240,14 @@ async def get_system_status():
         "last_update": updater.LAST_UPDATE_TIMESTAMP
     }
 
-
 @app.get("/leaderboard")
 async def serve_leaderboard():
     """Redirects to the leaderboard index page for backwards compatibility."""
     return RedirectResponse(url="/", status_code=301)
 
-
 # ---------------------------------------------------------------------------
 # Microsoft OAuth endpoints
 # ---------------------------------------------------------------------------
-
 
 @app.get("/auth/microsoft/login")
 async def microsoft_login():
@@ -289,7 +270,6 @@ async def microsoft_login():
         "prompt": "select_account",
     }
     return RedirectResponse(url=f"{_MICROSOFT_AUTH_URL}?{urlencode(params)}")
-
 
 @app.get("/auth/microsoft/callback")
 async def microsoft_callback(
@@ -348,16 +328,15 @@ async def microsoft_callback(
         logger.error("DB upsert failed for xuid=%s: %s", xuid, exc)
         return RedirectResponse(url="/?error=db_error")
 
-    return RedirectResponse(url=f"/?added={quote(gamertag)}")
+    return RedirectResponse(url=f"/?added={{quote(gamertag)}}")
     
-
 @app.post("/players/", response_model=PlayerOut, status_code=201, dependencies=[Depends(verify_api_key)])
 async def add_player_via_halo_api(request: PlayerSearchRequest):
     # 1. Check if they already exist in the local DB
     with Session(engine) as db:
         existing = db.exec(select(Player).where(Player.gamertag.ilike(request.gamertag))).first()
         if existing:
-            raise HTTPException(status_code=400, detail=f"Player '{existing.gamertag}' is already in the database.")
+            raise HTTPException(status_code=400, detail=f"Player '{{existing.gamertag}}' is already in the database.")
 
     # Fetch the XUID using spnkr
     try:
@@ -366,11 +345,11 @@ async def add_player_via_halo_api(request: PlayerSearchRequest):
                 response = await client.profile.get_user_by_gamertag(request.gamertag)
                 data = await response.json()
     except Exception as e:
-        logger.error(f"Halo API Error: {e}")
+        logger.error(f"Halo API Error: {{e}}")
         raise HTTPException(status_code=500, detail="Failed to communicate with the Halo API.")
 
     if not data or "xuid" not in data:
-        raise HTTPException(status_code=404, detail=f"Gamertag '{request.gamertag}' not found on Xbox Live.")
+        raise HTTPException(status_code=404, detail=f"Gamertag '{{request.gamertag}}' not found on Xbox Live.")
 
     xuid = data["xuid"]
 
@@ -385,7 +364,6 @@ async def add_player_via_halo_api(request: PlayerSearchRequest):
         db.commit()
         db.refresh(new_player)
         return _player_out(db, new_player)
-
 
 @app.get("/api/leaderboard", response_model=List[LeaderboardEntry])
 def get_leaderboard():
@@ -449,7 +427,7 @@ async def fetch_live_match_history(gamertag: str):
                 if not profile_data or "xuid" not in profile_data:
                     raise HTTPException(
                         status_code=404, 
-                        detail=f"Gamertag '{gamertag}' not found on Xbox Live."
+                        detail=f"Gamertag '{{gamertag}}' not found on Xbox Live."
                     )
                 
                 xuid = profile_data["xuid"]
@@ -469,7 +447,7 @@ async def fetch_live_match_history(gamertag: str):
         # Re-raise the 404 so it doesn't get caught by the general Exception block below
         raise
     except Exception as e:
-        logger.error(f"Live History Fetch Error: {e}")
+        logger.error(f"Live History Fetch Error: {{e}}")
         raise HTTPException(
             status_code=500, 
             detail="Failed to fetch live match history from the Halo API."
@@ -503,7 +481,6 @@ def get_players(skip: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=200)
             for p in players
         ]
 
-
 @app.get("/matches/", response_model=list[MatchOut])
 def get_matches(skip: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=500)):
     with Session(engine) as db:
@@ -513,8 +490,6 @@ def get_matches(skip: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=500
         for m in matches
     ]
     
-    
-
 @app.get("/players/{gamertag}/matches", response_model=list[MatchOut])
 def get_player_matches(gamertag: str = Path(..., description="The gamertag of the player")):
     with Session(engine) as db:
@@ -524,7 +499,7 @@ def get_player_matches(gamertag: str = Path(..., description="The gamertag of th
         player = db.exec(player_statement).first()
 
         if not player:
-            raise HTTPException(status_code=404, detail=f"Player '{gamertag}' not found in database.")
+            raise HTTPException(status_code=404, detail=f"Player '{{gamertag}}' not found in database.")
 
         # 2. Fetch matches for this specific player, newest first
         match_statement = (
@@ -545,12 +520,9 @@ def get_player_matches(gamertag: str = Path(..., description="The gamertag of th
             for m in matches
         ]
         
-
-
 @app.post("/api/debug/force-update", dependencies=[Depends(verify_api_key)])
 async def force_update_cycle():
-    """
-    DEBUG ONLY: Manually forces the background update cycle to run immediately.
+    """DEBUG ONLY: Manually forces the background update cycle to run immediately.
     This will block the HTTP response until the entire cycle is complete.
     """
     logger.info("DEBUG: Manual update cycle triggered via API.")
@@ -560,14 +532,12 @@ async def force_update_cycle():
         await _run_update_cycle(engine)
         return {"status": "success", "message": "Manual update cycle completed."}
     except Exception as e:
-        logger.error(f"DEBUG Update Failed: {e}")
+        logger.error(f"DEBUG Update Failed: {{e}}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.post("/api/debug/revalidate-matches", dependencies=[Depends(verify_api_key)])
 async def revalidate_all_matches():
-    """
-    DEBUG ONLY: Iterates through every match in the database, re-parses the 
+    """DEBUG ONLY: Iterates through every match in the database, re-parses the 
     raw JSON, and updates the is_valid flag based on the latest logic.
     """
     logger.info("Starting batch revalidation of all matches...")
@@ -600,13 +570,13 @@ async def revalidate_all_matches():
                         invalid_count += 1
                         
                 except Exception as parse_err:
-                    logger.error(f"Error parsing match {match.match_id}: {parse_err}")
+                    logger.error(f"Error parsing match {{match.match_id}}: {{parse_err}}")
                     continue
                     
             # Commit all the updates to the database in one big batch!
             db.commit()
             
-        logger.info(f"Revalidation complete! {valid_count} valid, {invalid_count} invalid.")
+        logger.info(f"Revalidation complete! {{valid_count}} valid, {{invalid_count}} invalid.")
         
         return {
             "status": "success",
@@ -617,9 +587,8 @@ async def revalidate_all_matches():
         }
         
     except Exception as e:
-        logger.error(f"Revalidation Failed: {e}")
+        logger.error(f"Revalidation Failed: {{e}}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=PORT, reload=True)
