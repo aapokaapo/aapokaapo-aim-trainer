@@ -297,7 +297,6 @@ async def _update_player(
             client.discovery_ugc.get_map, m.match_info.map_variant.asset_id, m.match_info.map_variant.version_id
         )
         raw_map = await map_resp.json()
-        logger.info(raw_map)
         
         mid = str(m.match_id)
         
