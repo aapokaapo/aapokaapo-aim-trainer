@@ -12,6 +12,7 @@
             display: flex;
             justify-content: center;
             padding-top: 50px;
+            padding-bottom: 50px;
             margin: 0;
         }
         .container {
@@ -84,6 +85,26 @@
         }
         .flash.success { background-color: #1b5e20; color: #a5d6a7; }
         .flash.error   { background-color: #b71c1c; color: #ef9a9a; }
+
+        /* Instructions Section */
+        .instructions {
+            background-color: #252525;
+            padding: 20px;
+            border-radius: 6px;
+            border-left: 4px solid #4CAF50;
+            margin-top: 30px;
+        }
+        .instructions h3 { margin-top: 0; color: #4CAF50; }
+        .instructions a { color: #64B5F6; text-decoration: none; }
+        .instructions a:hover { text-decoration: underline; }
+        .instructions ol { line-height: 1.6; padding-left: 20px; }
+        .auto-track-note {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: rgba(76, 175, 80, 0.1);
+            border-radius: 4px;
+            font-size: 0.95em;
+        }
     </style>
 </head>
 <body>
@@ -91,8 +112,11 @@
     <div class="container">
         <div class="header-row">
             <h2>Aim Trainer Leaderboard</h2>
+            <p id="lastUpdated" style="text-align: center; color: #888; font-size: 0.9em; margin-bottom: 20px;">
+                  Last updated: Loading...
+            </p>
             <a href="/auth/microsoft/login" class="btn-add-player">
-                &#43; Add player
+                &#43; Register to Leaderboard
             </a>
         </div>
 
@@ -113,6 +137,23 @@
                 <tr><td colspan="4" style="text-align: center;">Loading data...</td></tr>
             </tbody>
         </table>
+
+        <div class="instructions">
+            <h3>How to Participate</h3>
+            <ol>
+                <li>Register to Leaderboard</li>
+                <li>Bookmark the official game mode: <a href="https://www.halowaypoint.com/halo-iccde9ea1-200d-4017-98be-affc41460bae-98be-affc41460bae" target="_blank">AapoKaapo Aim Trainer V4</a> on Halo Waypoint.</li>
+                <li>Launch <strong>Halo Infinite</strong> and navigate to the <strong>Custom Games</strong> menu.</li>
+                <li>Select <strong>Create Custom Game</strong>.</li>
+                <li>Select your bookmarked <strong>AapoKaapo Aim Trainer V4</strong> as the gamemode.</li>
+                <li>Select <strong>Live Fire</strong> as the map.</li>
+                <li>Start the game and race to 100 kills!</li>
+            </ol>
+            <div class="auto-track-note">
+                <strong>✅ Automatic Tracking:</strong> As long as you have added your Gamertag using the button above, your times will be automatically fetched and included in this leaderboard. You do not need to manually upload anything!
+            </div>
+        </div>
+
     </div>
 
     <script>
@@ -201,8 +242,30 @@
             }
         }
 
-        // Run the fetch function when the page loads
-        window.onload = function () { showFlash(); loadLeaderboard(); };
+        
+        async function loadStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                const statusEl = document.getElementById('lastUpdated');
+                if (data.last_update) {
+                // Format the timestamp nicely
+                const date = new Date(data.last_update);
+                statusEl.innerText = `Last updated: ${date.toLocaleDateString()} at ${date.toLocaleTimeString()}`;
+                } else {
+                statusEl.innerText = "Last updated: Pending first cycle...";
+            }
+            } catch (error) {
+                console.error("Failed to fetch status:", error);
+            }
+        }
+        
+        // Update your window.onload to include the new function
+        window.onload = function () { 
+            showFlash(); 
+            loadLeaderboard(); 
+            loadStatus(); // Added this
+        };
     </script>
 </body>
 </html>

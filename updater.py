@@ -20,7 +20,13 @@ from haloclient import get_client
 from database import engine
 from models import Player, Match
 
+from datetime import datetime
+
+
+LAST_UPDATE_TIMESTAMP: Optional[datetime] = None
+
 logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -56,7 +62,7 @@ def _passes_criteria(match_entry) -> bool:
     return True
 
 
-def _check_if_match_valid(raw_json: dict, xuid: str) -> bool:
+def _check_if_match_valid(raw_json: dict, xuid: str, raw_map: dict) -> bool:
     """
     Parses the raw match stats JSON to verify the team reached 100 points 
     AND the player got at least 100 kills.
@@ -69,25 +75,39 @@ def _check_if_match_valid(raw_json: dict, xuid: str) -> bool:
         
         # 1. Find the player to get their Kills and their TeamId
         for p in raw_json.get("Players", []):
-            if p.get("PlayerId") == target_id:
-                player_team_id = p.get("TeamId")
-                player_kills = p.get("PlayerCoreStats", {}).get("Kills", 0)
-                break
+            
+            # Extract whatever the API gave us, convert to lowercase string
+            api_player_id = str(p.get("PlayerId", "")).lower()
+            
+            # If the raw XUID numbers exist anywhere inside that string, it's a match!
+            
+            if target_id == api_player_id:
+                player_team_stats = p.get("PlayerTeamStats", [])
+                for t in player_team_stats:
+                    player_team_id = t.get("TeamId")
                 
+                # Get kills and personal score
+                    core_stats = t.get("Stats", {}).get("CoreStats", {})
+                    player_kills = core_stats.get("Kills", 0)
+                break
         # If we couldn't find the player or they have no team, it's invalid
         if player_team_id is None:
             return False
-            
-        # 2. Find the team's final score
+        
         team_score = 0
-        for t in raw_json.get("Teams", []):
-            if t.get("TeamId") == player_team_id:
-                # The score is nested inside Stats -> CoreStats
-                team_score = t.get("Stats", {}).get("CoreStats", {}).get("Score", 0)
-                break
+        if player_team_id is not None:
+            for t in raw_json.get("Teams", []):
+                if t.get("TeamId") == player_team_id:
+                    team_score = t.get("Stats", {}).get("CoreStats", {}).get("Score", 0)
+                    break
+            
                 
         # 3. Check both conditions! 
         # (Using >= 100 is safer than == 100 just in case a multikill ends the game at 101)
+        if raw_map.get("PublicName", "") != "Live Fire - Ranked" or raw_map.get("Admin", "") != 'xuid(2814672600485177)':
+            return False
+        
+        
         return team_score >= 100 and player_kills >= 100
                 
     except Exception as e:
@@ -158,7 +178,7 @@ async def _update_player(
         # 2. Pass the target_id INSTEAD of the gamertag
         response = await fetch_with_backoff(
             client.stats.get_match_history, 
-            target_id,  # <--- CHANGED THIS LINE
+            target_id,
             start=start, 
             count=batch_size,
             match_type="custom"
@@ -225,28 +245,15 @@ async def _update_player(
     if not matches_to_fetch:
         return 0
 
-    # ------------------------------------------------------------------
-    # Fetch full match stats for each match that passed the filter.
-    # ------------------------------------------------------------------
-    match_stats_list = []
-    for m in matches_to_fetch:
-        # We also need to rate-limit the individual stats fetches
-        stats_resp = await fetch_with_backoff(
-            client.stats.get_match_stats, m.match_id
-        )
-        raw_json = await stats_resp.json()
-        match_stats_list.append((m, raw_json))
-        
-        # Add a tiny artificial delay between stats fetches just to be safe
-        await asyncio.sleep(1)
-    # ------------------------------------------------------------------
-    # Persist inside a single transaction.
-    # ------------------------------------------------------------------
     new_count = 0
     newest_match_id: Optional[str] = str(all_results[0].match_id)
 
+    # ------------------------------------------------------------------
+    # 1. Update the player's latest_match_id FIRST. 
+    # This ensures that even if the loop below crashes halfway through,
+    # we don't scan the same pages of history again next time.
+    # ------------------------------------------------------------------
     with Session(engine) as db:
-        # Re-fetch inside this session to avoid detached-instance issues.
         db_player = db.exec(select(Player).where(Player.xuid == player.xuid)).first()
         if db_player is None:
             logger.error("Player %s not found in DB during update – skipping.", player.xuid)
@@ -254,31 +261,52 @@ async def _update_player(
 
         db_player.latest_match_id = newest_match_id
         db.add(db_player)
-
-        for history_entry, raw_json in match_stats_list:
-            mid = str(history_entry.match_id)
-            if db.exec(select(Match).where(Match.match_id == mid)).first():
-                continue
-                
-            # Run our new validation check
-            is_valid = _check_if_match_valid(raw_json, player.xuid)
-                
-            match_obj = Match(
-                match_id=mid,
-                player_id=db_player.id,
-                duration=str(history_entry.match_info.duration),
-                played_at=history_entry.match_info.start_time,
-                raw_match_stats=json.dumps(raw_json),
-                is_valid=is_valid
-            )
-            db.add(match_obj)
-            new_count += 1
-
         db.commit()
+        
+        # Save the database's internal player ID so we can assign it to the matches
+        internal_player_id = db_player.id
 
-    logger.info(
-        "Player %s updated: %d new aim trainer match(es) stored.", player.gamertag, new_count
-    )
+    # ------------------------------------------------------------------
+    # 2. Fetch stats and insert them into the DB one by one.
+    # ------------------------------------------------------------------
+    for m in matches_to_fetch:
+        
+        # 1. Fetch the match stats from the Halo API
+        stats_resp = await fetch_with_backoff(
+            client.stats.get_match_stats, m.match_id
+        )
+        raw_json = await stats_resp.json()
+        
+        map_resp = await fetch_with_backoff(
+            client.discovery_ugc.get_map, m.match_info.map_variant.asset_id, m.match_info.map_variant.version_id
+        )
+        raw_map = await map_resp.json()
+        logger.info(raw_map)
+        
+        mid = str(m.match_id)
+        
+        # 2. Run our validation check
+        is_valid = _check_if_match_valid(raw_json, player.xuid, raw_map)
+        
+        # 3. Open a short-lived DB session to save just this single match
+        with Session(engine) as db:
+            # Double check it wasn't added concurrently
+            if not db.exec(select(Match).where(Match.match_id == mid)).first():
+                match_obj = Match(
+                    match_id=mid,
+                    player_id=internal_player_id,
+                    duration=str(m.match_info.duration),
+                    played_at=m.match_info.start_time,
+                    raw_match_stats=json.dumps(raw_json),
+                    is_valid=is_valid
+                )
+                db.add(match_obj)
+                db.commit()
+                new_count += 1
+                
+        # 4. Wait to respect rate limits before fetching the next one
+        await asyncio.sleep(1)
+
     return new_count
 
 
@@ -287,6 +315,7 @@ async def _update_player(
 # ---------------------------------------------------------------------------
 
 async def _run_update_cycle(engine) -> None:
+    global LAST_UPDATE_TIMESTAMP
     logger.info("Background update cycle starting…")
 
     with Session(engine) as db:
@@ -312,6 +341,8 @@ async def _run_update_cycle(engine) -> None:
     logger.info(
         "Background update cycle complete. Total new matches stored: %d.", total_new
     )
+    LAST_UPDATE_TIMESTAMP = datetime.now()
+    logger.info("Timestamp updated: %s", LAST_UPDATE_TIMESTAMP)
 
 
 # ---------------------------------------------------------------------------

@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 import secrets
 import time
 from contextlib import asynccontextmanager
@@ -17,6 +18,17 @@ from sqlmodel import Session, SQLModel, select
 from database import engine
 from haloclient import get_client
 from models import Match, Player
+
+import json # Make sure this is imported!
+from updater import start_background_task, _run_update_cycle, _check_if_match_valid, LAST_UPDATE_TIMESTAMP
+
+logging.basicConfig(
+    level=logging.DEBUG, # Change to DEBUG if you want to see absolutely everything
+    format="%(levelname)s: %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +152,6 @@ def create_db_and_tables():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     create_db_and_tables()
-    from updater import start_background_task
     task = start_background_task(engine)
     yield
     task.cancel()
@@ -203,6 +214,14 @@ def _player_out(db: Session, player: Player) -> PlayerOut:
 async def serve_frontend():
     """Serves the leaderboard as the index page."""
     return FileResponse("leaderboard.html")
+
+
+@app.get("/api/status")
+async def get_system_status():
+    """Returns the last time the background worker finished a cycle."""
+    return {
+        "last_update": LAST_UPDATE_TIMESTAMP
+    }
 
 
 @app.get("/leaderboard")
@@ -423,7 +442,8 @@ def get_matches():
         MatchOut(match_id=m.match_id, duration=m.duration, played_at=m.played_at)
         for m in matches
     ]
-
+    
+    
 
 @app.get("/players/{gamertag}/matches", response_model=list[MatchOut])
 def get_player_matches(gamertag: str = Path(..., description="The gamertag of the player")):
@@ -454,6 +474,82 @@ def get_player_matches(gamertag: str = Path(..., description="The gamertag of th
             )
             for m in matches
         ]
+        
+
+
+@app.post("/api/debug/force-update")
+async def force_update_cycle():
+    """
+    DEBUG ONLY: Manually forces the background update cycle to run immediately.
+    This will block the HTTP response until the entire cycle is complete.
+    """
+    logger.info("DEBUG: Manual update cycle triggered via API.")
+    
+    try:
+        # Await the cycle directly using your global database engine
+        await _run_update_cycle(engine)
+        return {"status": "success", "message": "Manual update cycle completed."}
+    except Exception as e:
+        logger.error(f"DEBUG Update Failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/debug/revalidate-matches")
+async def revalidate_all_matches():
+    """
+    DEBUG ONLY: Iterates through every match in the database, re-parses the 
+    raw JSON, and updates the is_valid flag based on the latest logic.
+    """
+    logger.info("Starting batch revalidation of all matches...")
+    
+    try:
+        with Session(engine) as db:
+            # Fetch all matches and their associated players (we need the player for the xuid)
+            statement = select(Match, Player).join(Player)
+            results = db.exec(statement).all()
+            
+            total_matches = len(results)
+            valid_count = 0
+            invalid_count = 0
+            
+            for match, player in results:
+                try:
+                    # 1. Parse the stored JSON string back into a Python dictionary
+                    raw_json = json.loads(match.raw_match_stats)
+                    
+                    # 2. Re-run the validation logic
+                    new_is_valid = _check_if_match_valid(raw_json, player.xuid)
+                    
+                    # 3. Update the match flag
+                    match.is_valid = new_is_valid
+                    db.add(match)
+                    
+                    if new_is_valid:
+                        valid_count += 1
+                    else:
+                        invalid_count += 1
+                        
+                except Exception as parse_err:
+                    logger.error(f"Error parsing match {match.match_id}: {parse_err}")
+                    continue
+                    
+            # Commit all the updates to the database in one big batch!
+            db.commit()
+            
+        logger.info(f"Revalidation complete! {valid_count} valid, {invalid_count} invalid.")
+        
+        return {
+            "status": "success",
+            "message": "All matches revalidated.",
+            "total_matches_checked": total_matches,
+            "valid_matches": valid_count,
+            "invalid_matches": invalid_count
+        }
+        
+    except Exception as e:
+        logger.error(f"Revalidation Failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

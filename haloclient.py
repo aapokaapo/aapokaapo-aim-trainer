@@ -15,7 +15,6 @@ Configuration (all read from .env):
 See https://acurtis166.github.io/SPNKr/getting-started/ for instructions on
 creating an Azure AD app and obtaining the initial refresh token.
 """
-
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -25,9 +24,10 @@ import aiohttp
 from dotenv import load_dotenv # <-- ADD THIS
 from spnkr import AzureApp, HaloInfiniteClient, refresh_player_tokens
 
+logger = logging.getLogger(__name__)
+
 # Force load the .env file before anything else happens in this file
 load_dotenv() # <-- ADD THIS
-logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Azure app singleton (built once from env; safe because the values never
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 _azure_app = AzureApp(
     client_id=os.getenv("AZURE_CLIENT_ID", ""),
     client_secret=os.getenv("AZURE_CLIENT_SECRET", ""),
-    redirect_uri=os.getenv("REDIRECT_URI", "https://localhost"),
+    redirect_uri=os.getenv("PUBLIC_BASE_URL", "http://localhost"),
 )
 
 
