@@ -137,7 +137,7 @@
                     <th>Rank</th>
                     <th>Gamertag</th>
                     <th>Best Time</th>
-                    <th>Date Achieved</th>
+                    <th>Date &amp; Time Achieved</th>
                 </tr>
             </thead>
             <tbody id="leaderboardBody">
@@ -169,6 +169,39 @@
     </div>
     
     <script>
+        /**
+         * Parse an ISO-8601 string and return a Date object, treating strings
+         * without an explicit timezone designator as UTC (not local time).
+         * This prevents a common bug where naive datetime strings from the
+         * backend are misinterpreted as local time by the browser.
+         */
+        function parseUTCDate(isoString) {
+            if (!isoString) return null;
+            // Already has a timezone designator (ends with Z or ±HH:MM)
+            if (isoString.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(isoString)) {
+                return new Date(isoString);
+            }
+            // No timezone info → assume UTC
+            return new Date(isoString + 'Z');
+        }
+
+        /**
+         * Format an ISO-8601 UTC string as a local date + time using the
+         * client's browser locale and timezone.
+         */
+        function formatLocalDateTime(isoString) {
+            const d = parseUTCDate(isoString);
+            if (!d || Number.isNaN(d.getTime())) return '';
+            return new Intl.DateTimeFormat(undefined, {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+            }).format(d);
+        }
+
         // Fetch and build the leaderboard on page load
         async function loadLeaderboard() {
             try {
@@ -192,8 +225,8 @@
                     else if (entry.rank === 2) rankStyle = 'class="rank-2"';
                     else if (entry.rank === 3) rankStyle = 'class="rank-3"';
 
-                    // Extract YYYY-MM-DD directly from the ISO string to avoid locale/timezone issues
-                    const date = entry.played_at.slice(0, 10);
+                    // Format played_at as client-local date and time
+                    const date = formatLocalDateTime(entry.played_at);
 
                     row.innerHTML = `
                         <td ${rankStyle}>#${entry.rank}</td>
@@ -260,8 +293,8 @@
                 const data = await response.json();
                 const statusEl = document.getElementById('lastUpdated');
                 if (data.last_update) {
-                    // Extract YYYY-MM-DD directly from the ISO string — stable and locale-independent
-                    statusEl.textContent = `Last updated: ${data.last_update.slice(0, 16)}`;
+                    // Convert UTC timestamp to the client's local date and time
+                    statusEl.textContent = `Last updated: ${formatLocalDateTime(data.last_update)}`;
                 } else {
                     statusEl.textContent = 'Last updated: Pending first cycle...';
                 }
