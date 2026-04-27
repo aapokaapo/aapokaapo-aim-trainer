@@ -5,25 +5,29 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Aim Trainer Leaderboard</title>
     <style>
+        * { box-sizing: border-box; }
         body {
             font-family: Arial, sans-serif;
             background-color: #121212;
             color: #ffffff;
             display: flex;
             flex-direction: column; /* Changed to column to stack containers */
-            align-items: center;    /* Center containers horizontally */
-            padding-top: 50px;
-            padding-bottom: 50px;
+            align-items: stretch;   /* Stretch fills the content box, respecting body padding */
+            padding: 50px 12px;
             margin: 0;
+            overflow-x: hidden;
         }
         .container {
             background-color: #1e1e1e;
             padding: 30px;
             border-radius: 8px;
             box-shadow: 0 4px 10px rgba(0,0,0,0.5);
-            width: 800px;
-            max-width: 90%;
-            margin-bottom: 20px; /* Space between the two containers */
+            width: 100%;
+            max-width: 860px;
+            min-width: 0;
+            overflow-wrap: break-word;
+            word-break: break-word;
+            margin: 0 auto 20px; /* auto left/right centers the container on wide screens */
         }
         h2 { text-align: center; margin-top: 0; }
         
@@ -42,11 +46,14 @@
         table {
             width: 100%;
             border-collapse: collapse;
+            table-layout: fixed;
         }
         th, td {
             padding: 12px;
             text-align: left;
             border-bottom: 1px solid #333;
+            overflow-wrap: break-word;
+            word-break: break-word;
         }
         th { background-color: #2a2a2a; }
         tr:hover { background-color: #333; }
@@ -58,6 +65,8 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
             margin-bottom: 20px;
         }
         .header-row h2 { margin: 0; }
@@ -114,6 +123,19 @@
             text-align: center;
             color: #888;
             font-size: 0.85em;
+        }
+
+        @media (max-width: 600px) {
+            body {
+                padding: 20px 12px;
+            }
+            .container {
+                padding: 16px;
+            }
+            th, td {
+                padding: 8px 6px;
+                font-size: 0.85em;
+            }
         }
     </style>
 </head>
