@@ -13,6 +13,7 @@ import os
 from typing import Optional
 
 import aiohttp
+from fastapi import HTTPException
 from sqlmodel import Session, select
 from haloclient import get_client
 
@@ -177,6 +178,27 @@ async def fetch_with_backoff(func, *args, **kwargs):
 # ---------------------------------------------------------------------------
 # Per-player update
 # ---------------------------------------------------------------------------
+
+async def get_raw_map(asset_id, version_id):
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with get_client(session) as client:
+                map_resp = await fetch_with_backoff(
+                    client.discovery_ugc.get_map, asset_id,
+                    version_id
+                )
+                raw_map = await map_resp.json()
+                if not raw_map:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Map not found"
+                    )
+
+                return raw_map
+
+    except HTTPException:
+        # Re-raise the 404 so it doesn't get caught by the general Exception block below
+        raise
 
 async def _update_player(
     client,

@@ -345,7 +345,7 @@ async def add_player_via_halo_api(request: PlayerSearchRequest):
                 response = await client.profile.get_user_by_gamertag(request.gamertag)
                 data = await response.json()
     except Exception as e:
-        logger.error(f"Halo API Error: {{e}}")
+        logger.error(f"Halo API Error: {e}")
         raise HTTPException(status_code=500, detail="Failed to communicate with the Halo API.")
 
     if not data or "xuid" not in data:
@@ -427,7 +427,7 @@ async def fetch_live_match_history(gamertag: str):
                 if not profile_data or "xuid" not in profile_data:
                     raise HTTPException(
                         status_code=404, 
-                        detail=f"Gamertag '{{gamertag}}' not found on Xbox Live."
+                        detail=f"Gamertag '{gamertag}' not found on Xbox Live."
                     )
                 
                 xuid = profile_data["xuid"]
@@ -447,7 +447,7 @@ async def fetch_live_match_history(gamertag: str):
         # Re-raise the 404 so it doesn't get caught by the general Exception block below
         raise
     except Exception as e:
-        logger.error(f"Live History Fetch Error: {{e}}")
+        logger.error(f"Live History Fetch Error: {e}")
         raise HTTPException(
             status_code=500, 
             detail="Failed to fetch live match history from the Halo API."
@@ -499,7 +499,7 @@ def get_player_matches(gamertag: str = Path(..., description="The gamertag of th
         player = db.exec(player_statement).first()
 
         if not player:
-            raise HTTPException(status_code=404, detail=f"Player '{{gamertag}}' not found in database.")
+            raise HTTPException(status_code=404, detail=f"Player '{gamertag}' not found in database.")
 
         # 2. Fetch matches for this specific player, newest first
         match_statement = (
@@ -532,8 +532,9 @@ async def force_update_cycle():
         await _run_update_cycle(engine)
         return {"status": "success", "message": "Manual update cycle completed."}
     except Exception as e:
-        logger.error(f"DEBUG Update Failed: {{e}}")
+        logger.error(f"DEBUG Update Failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/api/debug/revalidate-matches", dependencies=[Depends(verify_api_key)])
 async def revalidate_all_matches():
@@ -556,9 +557,13 @@ async def revalidate_all_matches():
                 try:
                     # 1. Parse the stored JSON string back into a Python dictionary
                     raw_json = json.loads(match.raw_match_stats)
-                    
+                    asset_id = raw_json.get("MatchInfo", None).get("MapVariant", "").get("AssetId", "")
+                    version_id = raw_json.get("MatchInfo", None).get("MapVariant", "").get("VersionId", "")
+                    raw_map = await updater.get_raw_map(asset_id, version_id)
+
+
                     # 2. Re-run the validation logic
-                    new_is_valid = _check_if_match_valid(raw_json, player.xuid)
+                    new_is_valid = _check_if_match_valid(raw_json, player.xuid, raw_map)
                     
                     # 3. Update the match flag
                     match.is_valid = new_is_valid
@@ -570,13 +575,13 @@ async def revalidate_all_matches():
                         invalid_count += 1
                         
                 except Exception as parse_err:
-                    logger.error(f"Error parsing match {{match.match_id}}: {{parse_err}}")
+                    logger.error(f"Error parsing match {match.match_id}: {parse_err}")
                     continue
                     
             # Commit all the updates to the database in one big batch!
             db.commit()
             
-        logger.info(f"Revalidation complete! {{valid_count}} valid, {{invalid_count}} invalid.")
+        logger.info(f"Revalidation complete! {valid_count} valid, {invalid_count} invalid.")
         
         return {
             "status": "success",
@@ -587,7 +592,7 @@ async def revalidate_all_matches():
         }
         
     except Exception as e:
-        logger.error(f"Revalidation Failed: {{e}}")
+        logger.error(f"Revalidation Failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
