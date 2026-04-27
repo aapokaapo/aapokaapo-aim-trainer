@@ -12,8 +12,8 @@ class Player(SQLModel, table=True):
 class Match(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     match_id: str = Field(index=True, unique=True)
-    player_id: int = Field(foreign_key="player.id")
+    player_id: int = Field(foreign_key="player.id", index=True)
     duration: str
     played_at: datetime
     raw_match_stats: str
-    is_valid: bool = Field(default=False)
+    is_valid: bool = Field(default=False, index=True)

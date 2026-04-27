@@ -261,7 +261,6 @@ async def _update_player(
     if not matches_to_fetch:
         return 0
 
-    new_count = 0
     newest_match_id: Optional[str] = str(all_results[0].match_id)
 
     # ------------------------------------------------------------------
@@ -283,8 +282,9 @@ async def _update_player(
         internal_player_id = db_player.id
 
     # ------------------------------------------------------------------
-    # 2. Fetch stats and insert them into the DB one by one.
+    # 2. Fetch stats and build match objects; commit in a single batch.
     # ------------------------------------------------------------------
+    new_matches: list[Match] = []
     for m in matches_to_fetch:
         
         # 1. Fetch the match stats from the Halo API
@@ -303,24 +303,35 @@ async def _update_player(
         # 2. Run our validation check
         is_valid = _check_if_match_valid(raw_json, player.xuid, raw_map)
         
-        # 3. Open a short-lived DB session to save just this single match
-        with Session(engine) as db:
-            # Double check it wasn't added concurrently
-            if not db.exec(select(Match).where(Match.match_id == mid)).first():
-                match_obj = Match(
-                    match_id=mid,
-                    player_id=internal_player_id,
-                    duration=str(m.match_info.duration),
-                    played_at=m.match_info.start_time,
-                    raw_match_stats=json.dumps(raw_json),
-                    is_valid=is_valid
-                )
-                db.add(match_obj)
-                db.commit()
-                new_count += 1
-                
-        # 4. Wait to respect rate limits before fetching the next one
+        new_matches.append(Match(
+            match_id=mid,
+            player_id=internal_player_id,
+            duration=str(m.match_info.duration),
+            played_at=m.match_info.start_time,
+            raw_match_stats=json.dumps(raw_json),
+            is_valid=is_valid,
+        ))
+
+        # 3. Wait to respect rate limits before fetching the next one
         await asyncio.sleep(1)
+
+    # Bulk-insert, skipping any that were concurrently added
+    new_count = 0
+    if new_matches:
+        with Session(engine) as db:
+            new_match_ids = [m.match_id for m in new_matches]
+            existing_ids = set(
+                db.exec(
+                    select(Match.match_id).where(
+                        Match.match_id.in_(new_match_ids)
+                    )
+                ).all()
+            )
+            to_add = [m for m in new_matches if m.match_id not in existing_ids]
+            for obj in to_add:
+                db.add(obj)
+            db.commit()
+            new_count = len(to_add)
 
     return new_count
 
@@ -360,6 +371,12 @@ async def _run_update_cycle(engine) -> None:
     )
     LAST_UPDATE_TIMESTAMP = datetime.now(timezone.utc)
     logger.info("Timestamp updated: %s", LAST_UPDATE_TIMESTAMP)
+
+    try:
+        import main as _main
+        _main.invalidate_leaderboard_cache()
+    except Exception:
+        logger.debug("Could not invalidate leaderboard cache", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
