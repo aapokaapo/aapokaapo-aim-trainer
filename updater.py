@@ -116,7 +116,7 @@ def _check_if_match_valid(raw_json: dict, xuid: str, raw_map: dict) -> bool:
                 for t in player_team_stats:
                     if t.get("TeamId") == player_team_id:
                         players_on_this_team.append(p)
-        if players_on_this_team > 1:
+        if len(players_on_this_team) > 1:
             return False
 
         team_score = 0
