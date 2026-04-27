@@ -10,7 +10,8 @@
             background-color: #121212;
             color: #ffffff;
             display: flex;
-            justify-content: center;
+            flex-direction: column; /* Changed to column to stack containers */
+            align-items: center;    /* Center containers horizontally */
             padding-top: 50px;
             padding-bottom: 50px;
             margin: 0;
@@ -22,6 +23,7 @@
             box-shadow: 0 4px 10px rgba(0,0,0,0.5);
             width: 800px;
             max-width: 90%;
+            margin-bottom: 20px; /* Space between the two containers */
         }
         h2 { text-align: center; margin-top: 0; }
         
@@ -92,7 +94,6 @@
             padding: 20px;
             border-radius: 6px;
             border-left: 4px solid #4CAF50;
-            margin-top: 30px;
         }
         .instructions h3 { margin-top: 0; color: #4CAF50; }
         .instructions a { color: #64B5F6; text-decoration: none; }
@@ -144,6 +145,12 @@
             </tbody>
         </table>
 
+        <footer class="leaderboard-footer">
+            <p id="lastUpdated">Last updated: Loading...</p>
+        </footer>
+    </div>
+
+    <div class="container">
         <div class="instructions">
             <h3>How to Participate</h3>
             <ol>
@@ -159,13 +166,8 @@
                 <strong>✅ Automatic Tracking:</strong> As long as you have added your Gamertag using the button above, your times will be automatically fetched and included in this leaderboard. You do not need to manually upload anything!
             </div>
         </div>
-
-        <footer class="leaderboard-footer">
-            <p id="lastUpdated">Last updated: Loading...</p>
-        </footer>
-
     </div>
-
+    
     <script>
         // Fetch and build the leaderboard on page load
         async function loadLeaderboard() {
@@ -259,7 +261,7 @@
                 const statusEl = document.getElementById('lastUpdated');
                 if (data.last_update) {
                     // Extract YYYY-MM-DD directly from the ISO string — stable and locale-independent
-                    statusEl.textContent = `Last updated: ${data.last_update.slice(0, 10)}`;
+                    statusEl.textContent = `Last updated: ${data.last_update.slice(0, 16)}`;
                 } else {
                     statusEl.textContent = 'Last updated: Pending first cycle...';
                 }
