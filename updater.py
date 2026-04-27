@@ -118,7 +118,10 @@ async def fetch_with_backoff(func, *args, **kwargs):
                         # We ignore it and stick to the 60s default.
                         pass 
                 
-                print(f"⚠️ Rate Limited (429). Waiting {wait}s before retry {attempt+1}/{max_attempts}...")
+                logger.warning(
+                    "Rate limited (429). Waiting %ds before retry %d/%d…",
+                    wait, attempt + 1, max_attempts,
+                )
                 await asyncio.sleep(wait)
             else:
                 # If it's a 401 (Token Expired) or 404, let the main logic handle it
@@ -193,7 +196,6 @@ async def _update_player(
     if not filtered:
         # We need to update their latest_match_id so we don't scan these again next time
         with Session(engine) as db:
-            from models import Player  # noqa: PLC0415
             db_player = db.exec(select(Player).where(Player.xuid == player.xuid)).first()
             if db_player:
                 db_player.latest_match_id = str(all_results[0].match_id)
@@ -245,7 +247,6 @@ async def _update_player(
 
     with Session(engine) as db:
         # Re-fetch inside this session to avoid detached-instance issues.
-        from models import Player  # noqa: PLC0415
         db_player = db.exec(select(Player).where(Player.xuid == player.xuid)).first()
         if db_player is None:
             logger.error("Player %s not found in DB during update – skipping.", player.xuid)
@@ -286,8 +287,6 @@ async def _update_player(
 # ---------------------------------------------------------------------------
 
 async def _run_update_cycle(engine) -> None:
-    from models import Player  # noqa: PLC0415
-
     logger.info("Background update cycle starting…")
 
     with Session(engine) as db:

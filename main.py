@@ -1,18 +1,18 @@
 import logging
-import os
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
-from sqlmodel import Session, SQLModel, select
-# Import engine and models from the new files
-from database import engine
-from models import Match, Player
-from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional, List
-import uvicorn
-from fastapi.responses import FileResponse
+
 import aiohttp
+import uvicorn
+from fastapi import FastAPI, HTTPException, Path
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+from sqlmodel import Session, SQLModel, select
+
+from database import engine
 from haloclient import get_client
+from models import Match, Player
 
 logger = logging.getLogger(__name__)
 
@@ -35,11 +35,6 @@ app = FastAPI(title="Halo Aim Trainer Match Importer", lifespan=lifespan)
 # Request / Response schemas
 # ---------------------------------------------------------------------------
 
-class ImportRequest(BaseModel):
-    gamertag: str
-    gamemode: int
-
-
 class MatchOut(BaseModel):
     match_id: str
     duration: str
@@ -53,20 +48,10 @@ class PlayerOut(BaseModel):
     matches: list[MatchOut]
 
 
-class ImportResponse(BaseModel):
-    imported: int
-    player: PlayerOut
-
-
-class PlayerCreate(BaseModel):
-    gamertag: str
-    xuid: str
-
-
 class PlayerSearchRequest(BaseModel):
     gamertag: str
-    
-    
+
+
 class LeaderboardEntry(BaseModel):
     rank: int
     gamertag: str
@@ -77,14 +62,6 @@ class LeaderboardEntry(BaseModel):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _get_or_create_player(db: Session, xuid: str, gamertag: str) -> Player:
-    player = db.exec(select(Player).where(Player.xuid == xuid)).first()
-    if not player:
-        player = Player(xuid=xuid, gamertag=gamertag)
-        db.add(player)
-        db.flush()
-    return player
 
 
 def _player_out(db: Session, player: Player) -> PlayerOut:
@@ -118,7 +95,6 @@ async def serve_leaderboard():
     return FileResponse("leaderboard.html")
     
 
-# 3. The new Async POST endpoint
 @app.post("/players/", response_model=PlayerOut, status_code=201)
 async def add_player_via_halo_api(request: PlayerSearchRequest):
     # 1. Check if they already exist in the local DB
@@ -127,26 +103,22 @@ async def add_player_via_halo_api(request: PlayerSearchRequest):
         if existing:
             raise HTTPException(status_code=400, detail=f"Player '{existing.gamertag}' is already in the database.")
 
-    # 2. Fetch the XUID using spnkr
+    # Fetch the XUID using spnkr
     try:
         async with aiohttp.ClientSession() as session:
             async with get_client(session) as client:
-                # FIX 1: Pass the string directly, NO brackets!
-                # FIX 2: Use the singular method 'get_user_by_gamertag'
                 response = await client.profile.get_user_by_gamertag(request.gamertag)
                 data = await response.json()
-                
-                # FIX 3: Since we fetch a single user, it returns a dictionary, not a list.
-                if not data or "xuid" not in data:
-                    raise HTTPException(status_code=404, detail=f"Gamertag '{request.gamertag}' not found on Xbox Live.")
-                
-                # Extract the newly found XUID
-                xuid = data["xuid"]
     except Exception as e:
         logger.error(f"Halo API Error: {e}")
         raise HTTPException(status_code=500, detail="Failed to communicate with the Halo API.")
 
-    # 3. Save the new player to the database
+    if not data or "xuid" not in data:
+        raise HTTPException(status_code=404, detail=f"Gamertag '{request.gamertag}' not found on Xbox Live.")
+
+    xuid = data["xuid"]
+
+    # Save the new player to the database
     with Session(engine) as db:
         # Double check XUID uniqueness just in case they changed their gamertag
         if db.exec(select(Player).where(Player.xuid == xuid)).first():
@@ -232,107 +204,6 @@ async def fetch_live_match_history(gamertag: str):
             detail="Failed to fetch live match history from the Halo API."
         )
 
-@app.post("/import-matches/", response_model=ImportResponse)
-async def import_matches(body: ImportRequest):
-    spartan_token = os.getenv("SPARTAN_TOKEN")
-    clearance_token = os.getenv("CLEARANCE_TOKEN")
-
-    if not spartan_token or not clearance_token:
-        raise HTTPException(
-            status_code=500,
-            detail="SPARTAN_TOKEN and CLEARANCE_TOKEN environment variables must be set.",
-        )
-
-    async with aiohttp.ClientSession() as session:
-        client = HaloInfiniteClient(
-            session=session,
-            spartan_token=spartan_token,
-            clearance_token=clearance_token,
-        )
-
-        # Resolve XUID from the profile API before touching the DB.
-        profile_resp = await client.profile.get_user_by_gamertag(body.gamertag)
-        user = await profile_resp.parse()
-        xuid = str(user.xuid)
-
-        # Ensure the player row exists and retrieve the current cursor.
-        with Session(engine) as db:
-            player = _get_or_create_player(db, xuid, body.gamertag)
-            db.commit()
-            db.refresh(player)
-            stop_at_match_id = player.latest_match_id
-
-        # Fetch match history, stopping once we reach the previously stored
-        # latest match (incremental fetch).
-        all_results = []
-        start = 0
-        batch_size = 25
-        done = False
-        while not done:
-            response = await client.stats.get_match_history(
-                body.gamertag, start=start, count=batch_size
-            )
-            history = await response.parse()
-            for result in history.results:
-                if stop_at_match_id and str(result.match_id) == stop_at_match_id:
-                    done = True
-                    break
-                all_results.append(result)
-            if history.result_count < batch_size:
-                break
-            if done:
-                break
-            start += batch_size
-
-        # Filter by requested gamemode.
-        filtered = [
-            m
-            for m in all_results
-            if int(m.match_info.game_variant_category) == body.gamemode
-        ]
-
-        # Fetch raw match stats JSON for each match that passes the filter.
-        match_stats_list = []
-        for m in filtered:
-            stats_resp = await client.stats.get_match_stats(m.match_id)
-            raw_json = await stats_resp.json()
-            match_stats_list.append((m, raw_json))
-
-    # Persist everything inside a single transaction.
-    new_count = 0
-    # Track the newest match seen across ALL game modes as the new cursor.
-    newest_match_id: Optional[str] = str(all_results[0].match_id) if all_results else None
-
-    with Session(engine) as db:
-        player = db.exec(select(Player).where(Player.xuid == xuid)).first()
-        if player is None:
-            raise HTTPException(status_code=500, detail="Player record missing after creation.")
-
-        if newest_match_id is not None:
-            player.latest_match_id = newest_match_id
-        db.add(player)
-
-        for history_entry, raw_json in match_stats_list:
-            mid = str(history_entry.match_id)
-            if db.exec(select(Match).where(Match.match_id == mid)).first():
-                continue
-            match_obj = Match(
-                match_id=mid,
-                player_id=player.id,
-                duration=str(history_entry.match_info.duration),
-                played_at=history_entry.match_info.start_time,
-                raw_match_stats=json.dumps(raw_json),
-            )
-            db.add(match_obj)
-            new_count += 1
-
-        db.commit()
-        db.refresh(player)
-        player_out = _player_out(db, player)
-
-    return ImportResponse(imported=new_count, player=player_out)
-
-
 @app.get("/players/", response_model=list[PlayerOut])
 def get_players():
     with Session(engine) as db:
@@ -349,8 +220,6 @@ def get_matches():
         for m in matches
     ]
 
-
-from fastapi import Path
 
 @app.get("/players/{gamertag}/matches", response_model=list[MatchOut])
 def get_player_matches(gamertag: str = Path(..., description="The gamertag of the player")):

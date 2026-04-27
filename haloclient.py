@@ -65,7 +65,7 @@ async def get_client(
             async with get_client(session) as client:
                 resp = await client.stats.get_match_history(gamertag)
     """
-    print("Trying to initialize HaloClient")
+    logger.debug("Initializing Halo client…")
     refresh_token = os.getenv("AZURE_REFRESH_TOKEN")
     if not refresh_token:
         raise RuntimeError(
