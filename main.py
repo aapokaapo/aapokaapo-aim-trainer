@@ -28,7 +28,7 @@ AZURE_CLIENT_ID = os.environ.get("AZURE_CLIENT_ID", "")
 AZURE_CLIENT_SECRET = os.environ.get("AZURE_CLIENT_SECRET", "")
 # PUBLIC_BASE_URL is used to build the OAuth redirect URI.
 # For local dev: http://127.0.0.1:8000  |  for prod: https://aimtrainer.aapokaapostats.site
-PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
 
 _MICROSOFT_TENANT = "consumers"  # Xbox Live accounts are Microsoft consumer accounts
 _MICROSOFT_AUTH_URL = f"https://login.microsoftonline.com/{_MICROSOFT_TENANT}/oauth2/v2.0/authorize"
@@ -63,7 +63,7 @@ async def _exchange_code_for_token(session: aiohttp.ClientSession, code: str) ->
         "code": code,
         "grant_type": "authorization_code",
         "redirect_uri": redirect_uri,
-        "scope": "XboxLive.signin offline_access",
+        "scope": "XboxLive.signin",
     }
     async with session.post(_MICROSOFT_TOKEN_URL, data=data) as resp:
         body = await resp.json(content_type=None)
@@ -231,7 +231,7 @@ async def microsoft_login():
         "client_id": AZURE_CLIENT_ID,
         "response_type": "code",
         "redirect_uri": redirect_uri,
-        "scope": "XboxLive.signin offline_access",
+        "scope": "XboxLive.signin",
         "state": state,
         "response_mode": "query",
         "prompt": "select_account",
