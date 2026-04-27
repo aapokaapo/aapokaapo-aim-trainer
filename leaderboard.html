@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aim Trainer Leaderboard</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #121212;
+            color: #ffffff;
+            display: flex;
+            justify-content: center;
+            padding-top: 50px;
+            margin: 0;
+        }
+        .container {
+            background-color: #1e1e1e;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            width: 800px;
+            max-width: 90%;
+        }
+        h2 { text-align: center; margin-top: 0; }
+        
+        input[type="text"] {
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 20px;
+            border: 1px solid #333;
+            border-radius: 4px;
+            background-color: #2a2a2a;
+            color: white;
+            box-sizing: border-box;
+            font-size: 16px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #333;
+        }
+        th { background-color: #2a2a2a; }
+        tr:hover { background-color: #333; }
+        .rank-1 { color: #ffd700; font-weight: bold; } /* Gold */
+        .rank-2 { color: #c0c0c0; font-weight: bold; } /* Silver */
+        .rank-3 { color: #cd7f32; font-weight: bold; } /* Bronze */
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h2>Aim Trainer Leaderboard</h2>
+        
+        <input type="text" id="searchInput" onkeyup="filterTable()" placeholder="Search for a gamertag...">
+        
+        <table id="leaderboardTable">
+            <thead>
+                <tr>
+                    <th>Rank</th>
+                    <th>Gamertag</th>
+                    <th>Best Time</th>
+                    <th>Date Achieved</th>
+                </tr>
+            </thead>
+            <tbody id="leaderboardBody">
+                <tr><td colspan="4" style="text-align: center;">Loading data...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        // Fetch and build the leaderboard on page load
+        async function loadLeaderboard() {
+            try {
+                const response = await fetch('/api/leaderboard');
+                const data = await response.json();
+                
+                const tbody = document.getElementById('leaderboardBody');
+                tbody.innerHTML = ''; // Clear loading text
+                
+                if (data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" style="text-align: center;">No times recorded yet.</td></tr>';
+                    return;
+                }
+
+                data.forEach(entry => {
+                    const row = document.createElement('tr');
+                    
+                    // Add special CSS classes for top 3
+                    let rankStyle = '';
+                    if (entry.rank === 1) rankStyle = 'class="rank-1"';
+                    else if (entry.rank === 2) rankStyle = 'class="rank-2"';
+                    else if (entry.rank === 3) rankStyle = 'class="rank-3"';
+
+                    // Format the date nicely
+                    const date = new Date(entry.played_at).toLocaleDateString();
+
+                    row.innerHTML = `
+                        <td ${rankStyle}>#${entry.rank}</td>
+                        <td style="font-weight: bold;">${entry.gamertag}</td>
+                        <td>${entry.duration}</td>
+                        <td>${date}</td>
+                    `;
+                    tbody.appendChild(row);
+                });
+            } catch (error) {
+                document.getElementById('leaderboardBody').innerHTML = 
+                    '<tr><td colspan="4" style="text-align: center; color: red;">Failed to load leaderboard.</td></tr>';
+            }
+        }
+
+        // Live Search Filter Function
+        function filterTable() {
+            const input = document.getElementById("searchInput").value.toUpperCase();
+            const table = document.getElementById("leaderboardTable");
+            const tr = table.getElementsByTagName("tr");
+
+            // Loop through all table rows, hide those that don't match the search query
+            for (let i = 1; i < tr.length; i++) { // Start at 1 to skip the header row
+                const tdGamertag = tr[i].getElementsByTagName("td")[1];
+                if (tdGamertag) {
+                    const txtValue = tdGamertag.textContent || tdGamertag.innerText;
+                    if (txtValue.toUpperCase().indexOf(input) > -1) {
+                        tr[i].style.display = "";
+                    } else {
+                        tr[i].style.display = "none";
+                    }
+                }       
+            }
+        }
+
+        // Run the fetch function when the page loads
+        window.onload = loadLeaderboard;
+    </script>
+</body>
+</html>

@@ -22,8 +22,11 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 import aiohttp
+from dotenv import load_dotenv # <-- ADD THIS
 from spnkr import AzureApp, HaloInfiniteClient, refresh_player_tokens
 
+# Force load the .env file before anything else happens in this file
+load_dotenv() # <-- ADD THIS
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -62,7 +65,8 @@ async def get_client(
             async with get_client(session) as client:
                 resp = await client.stats.get_match_history(gamertag)
     """
-    refresh_token = os.getenv("AZURE_REFRESH_TOKEN", "")
+    print("Trying to initialize HaloClient")
+    refresh_token = os.getenv("AZURE_REFRESH_TOKEN")
     if not refresh_token:
         raise RuntimeError(
             "AZURE_REFRESH_TOKEN is not set. "
