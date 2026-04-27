@@ -432,7 +432,7 @@ def get_leaderboard():
     _leaderboard_cache["expires_at"] = now + _LEADERBOARD_CACHE_TTL
     return leaderboard
 
-@app.get("/players/{gamertag}/history/live")
+@app.get("/players/{gamertag}/history/live", dependencies=[Depends(verify_api_key)])
 async def fetch_live_match_history(gamertag: str):
     """
     Fetches the live match history directly from the Halo Infinite API 
