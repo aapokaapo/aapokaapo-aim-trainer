@@ -151,7 +151,7 @@ async def _get_xbox_gamertag(
     session: aiohttp.ClientSession, xuid: str, uhs: str, xsts_token: str
 ) -> str:
     """Fetch the gamertag for a given XUID using the Xbox Live profile API."""
-    auth_header = f"XBL3.0 x={{uhs}};{{xsts_token}}"
+    auth_header = f"XBL3.0 x={uhs};{xsts_token}"
     headers = {
         "Authorization": auth_header,
         "x-xbl-contract-version": "2",
@@ -328,7 +328,7 @@ async def microsoft_callback(
         logger.error("DB upsert failed for xuid=%s: %s", xuid, exc)
         return RedirectResponse(url="/?error=db_error")
 
-    return RedirectResponse(url=f"/?added={{quote(gamertag)}}")
+    return RedirectResponse(url=f"/?added={quote(gamertag)}")
     
 @app.post("/players/", response_model=PlayerOut, status_code=201, dependencies=[Depends(verify_api_key)])
 async def add_player_via_halo_api(request: PlayerSearchRequest):
@@ -336,7 +336,7 @@ async def add_player_via_halo_api(request: PlayerSearchRequest):
     with Session(engine) as db:
         existing = db.exec(select(Player).where(Player.gamertag.ilike(request.gamertag))).first()
         if existing:
-            raise HTTPException(status_code=400, detail=f"Player '{{existing.gamertag}}' is already in the database.")
+            raise HTTPException(status_code=400, detail=f"Player '{existing.gamertag}' is already in the database.")
 
     # Fetch the XUID using spnkr
     try:

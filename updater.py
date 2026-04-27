@@ -88,7 +88,9 @@ def _check_if_match_valid(raw_json: dict, xuid: str, raw_map: dict) -> bool:
         player_kills = 0
         
         # 1. Find the player to get their Kills and their TeamId
-        for p in raw_json.get("Players", []):
+        players = raw_json.get("Players", [])
+
+        for p in players:
             
             # Extract whatever the API gave us, convert to lowercase string
             api_player_id = str(p.get("PlayerId", "")).lower()
@@ -107,7 +109,16 @@ def _check_if_match_valid(raw_json: dict, xuid: str, raw_map: dict) -> bool:
         # If we couldn't find the player or they have no team, it's invalid
         if player_team_id is None:
             return False
-        
+
+        players_on_this_team = []
+        for p in players:
+            if p.get("PlayerTeamStats", []):
+                for t in player_team_stats:
+                    if t.get("TeamId") == player_team_id:
+                        players_on_this_team.append(p)
+        if players_on_this_team > 1:
+            return False
+
         team_score = 0
         if player_team_id is not None:
             for t in raw_json.get("Teams", []):
