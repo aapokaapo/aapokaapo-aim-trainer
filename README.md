@@ -61,6 +61,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 | `DATABASE_URL` | `sqlite:///matches.db` | SQLAlchemy connection string |
 | `UPDATE_INTERVAL_SECONDS` | `300` | Seconds between automatic background match-sync cycles |
 | `INTER_PLAYER_DELAY_SECONDS` | `2` | Pause (seconds) between syncing consecutive players to respect API rate limits |
+| `API_KEY` | *(required)* | Secret key that must be supplied via the `X-API-Key` header on all POST requests |
 
 ## How to Participate
 
@@ -71,6 +72,15 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 5. Race to 100 kills — your time is automatically tracked!
 
 ## API Endpoints
+
+All **POST** endpoints are protected and require the `X-API-Key` request header to be set to the value of the `API_KEY` environment variable. Requests with a missing or incorrect key receive a `401 Unauthorized` response.
+
+Example:
+
+```bash
+curl -X POST https://aimtrainer.aapokaapostats.site/api/debug/force-update \
+     -H "X-API-Key: your_strong_random_api_key_here"
+```
 
 | Method | Path | Description |
 |---|---|---|

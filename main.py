@@ -10,7 +10,8 @@ from urllib.parse import urlencode, quote
 
 import aiohttp
 import uvicorn
-from fastapi import FastAPI, HTTPException, Path, Query
+from fastapi import Depends, FastAPI, HTTPException, Path, Query, Security, status
+from fastapi.security import APIKeyHeader
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import func
@@ -40,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 AZURE_CLIENT_ID = os.environ.get("AZURE_CLIENT_ID", "")
 AZURE_CLIENT_SECRET = os.environ.get("AZURE_CLIENT_SECRET", "")
+API_KEY = os.environ.get("API_KEY", "")
 # PUBLIC_BASE_URL is used to build the OAuth redirect URI.
 # For local dev: http://127.0.0.1:8000  |  for prod: https://aimtrainer.aapokaapostats.site
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
@@ -78,6 +80,23 @@ def _purge_expired_states() -> None:
 # ---------------------------------------------------------------------------
 # Xbox token-exchange helpers
 # ---------------------------------------------------------------------------
+
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def verify_api_key(api_key: str = Security(_api_key_header)) -> None:
+    """Dependency that validates the X-API-Key header for write endpoints."""
+    if not API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="API key is not configured on the server.",
+        )
+    if not api_key or not secrets.compare_digest(api_key, API_KEY):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API key.",
+            headers={"WWW-Authenticate": "ApiKey"},
+        )
 
 
 async def _exchange_code_for_token(session: aiohttp.ClientSession, code: str) -> dict:
@@ -332,7 +351,7 @@ async def microsoft_callback(
     return RedirectResponse(url=f"/?added={quote(gamertag)}")
     
 
-@app.post("/players/", response_model=PlayerOut, status_code=201)
+@app.post("/players/", response_model=PlayerOut, status_code=201, dependencies=[Depends(verify_api_key)])
 async def add_player_via_halo_api(request: PlayerSearchRequest):
     # 1. Check if they already exist in the local DB
     with Session(engine) as db:
@@ -528,7 +547,7 @@ def get_player_matches(gamertag: str = Path(..., description="The gamertag of th
         
 
 
-@app.post("/api/debug/force-update")
+@app.post("/api/debug/force-update", dependencies=[Depends(verify_api_key)])
 async def force_update_cycle():
     """
     DEBUG ONLY: Manually forces the background update cycle to run immediately.
@@ -545,7 +564,7 @@ async def force_update_cycle():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/debug/revalidate-matches")
+@app.post("/api/debug/revalidate-matches", dependencies=[Depends(verify_api_key)])
 async def revalidate_all_matches():
     """
     DEBUG ONLY: Iterates through every match in the database, re-parses the 
