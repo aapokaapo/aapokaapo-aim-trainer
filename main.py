@@ -1,12 +1,16 @@
 import logging
+import os
+import secrets
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional, List
+from urllib.parse import urlencode, quote
 
 import aiohttp
 import uvicorn
-from fastapi import FastAPI, HTTPException, Path
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Path, Query
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlmodel import Session, SQLModel, select
 
@@ -15,6 +19,119 @@ from haloclient import get_client
 from models import Match, Player
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Microsoft / Xbox OAuth configuration
+# ---------------------------------------------------------------------------
+
+AZURE_CLIENT_ID = os.environ.get("AZURE_CLIENT_ID", "")
+AZURE_CLIENT_SECRET = os.environ.get("AZURE_CLIENT_SECRET", "")
+# PUBLIC_BASE_URL is used to build the OAuth redirect URI.
+# For local dev: http://127.0.0.1:8000  |  for prod: https://aimtrainer.aapokaapostats.site
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
+
+_MICROSOFT_TENANT = "consumers"  # Xbox Live accounts are Microsoft consumer accounts
+_MICROSOFT_AUTH_URL = f"https://login.microsoftonline.com/{_MICROSOFT_TENANT}/oauth2/v2.0/authorize"
+_MICROSOFT_TOKEN_URL = f"https://login.microsoftonline.com/{_MICROSOFT_TENANT}/oauth2/v2.0/token"
+_XBL_AUTH_URL = "https://user.auth.xboxlive.com/user/authenticate"
+_XSTS_AUTH_URL = "https://xsts.auth.xboxlive.com/xsts/authorize"
+_XBOX_PROFILE_URL_TEMPLATE = "https://profile.xboxlive.com/users/xuid({xuid})/profile/settings"
+
+# In-memory CSRF state store: state_token -> created_at (unix timestamp)
+_oauth_states: dict[str, float] = {}
+_STATE_TTL = 600  # 10 minutes
+
+
+def _purge_expired_states() -> None:
+    now = time.time()
+    expired = [k for k, v in _oauth_states.items() if now - v > _STATE_TTL]
+    for k in expired:
+        del _oauth_states[k]
+
+
+# ---------------------------------------------------------------------------
+# Xbox token-exchange helpers
+# ---------------------------------------------------------------------------
+
+
+async def _exchange_code_for_token(session: aiohttp.ClientSession, code: str) -> dict:
+    """Exchange an OAuth authorization code for a Microsoft access token."""
+    redirect_uri = f"{PUBLIC_BASE_URL}/auth/microsoft/callback"
+    data = {
+        "client_id": AZURE_CLIENT_ID,
+        "client_secret": AZURE_CLIENT_SECRET,
+        "code": code,
+        "grant_type": "authorization_code",
+        "redirect_uri": redirect_uri,
+        "scope": "XboxLive.signin offline_access",
+    }
+    async with session.post(_MICROSOFT_TOKEN_URL, data=data) as resp:
+        body = await resp.json(content_type=None)
+        if resp.status != 200:
+            raise RuntimeError(f"Token exchange failed ({resp.status}): {body.get('error_description', body)}")
+        return body
+
+
+async def _get_xbl_token(session: aiohttp.ClientSession, ms_access_token: str) -> dict:
+    """Exchange a Microsoft access token for an Xbox Live (XBL) user token."""
+    payload = {
+        "Properties": {
+            "AuthMethod": "RPS",
+            "SiteName": "user.auth.xboxlive.com",
+            "RpsTicket": f"d={ms_access_token}",
+        },
+        "RelyingParty": "http://auth.xboxlive.com",
+        "TokenType": "JWT",
+    }
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    async with session.post(_XBL_AUTH_URL, json=payload, headers=headers) as resp:
+        body = await resp.json(content_type=None)
+        if resp.status != 200:
+            raise RuntimeError(f"XBL auth failed ({resp.status}): {body}")
+        return body
+
+
+async def _get_xsts_token(session: aiohttp.ClientSession, xbl_token: str) -> dict:
+    """Exchange an XBL token for an XSTS token required by Xbox Live APIs."""
+    payload = {
+        "Properties": {
+            "SandboxId": "RETAIL",
+            "UserTokens": [xbl_token],
+        },
+        "RelyingParty": "http://xboxlive.com",
+        "TokenType": "JWT",
+    }
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    async with session.post(_XSTS_AUTH_URL, json=payload, headers=headers) as resp:
+        body = await resp.json(content_type=None)
+        if resp.status != 200:
+            raise RuntimeError(f"XSTS auth failed ({resp.status}): {body}")
+        return body
+
+
+async def _get_xbox_gamertag(
+    session: aiohttp.ClientSession, xuid: str, uhs: str, xsts_token: str
+) -> str:
+    """Fetch the gamertag for a given XUID using the Xbox Live profile API."""
+    auth_header = f"XBL3.0 x={uhs};{xsts_token}"
+    headers = {
+        "Authorization": auth_header,
+        "x-xbl-contract-version": "2",
+        "Accept": "application/json",
+    }
+    url = _XBOX_PROFILE_URL_TEMPLATE.format(xuid=xuid)
+    async with session.get(url, headers=headers, params={"settings": "Gamertag"}) as resp:
+        body = await resp.json(content_type=None)
+        if resp.status != 200:
+            raise RuntimeError(f"Xbox profile fetch failed ({resp.status}): {body}")
+    try:
+        for setting in body["profileUsers"][0]["settings"]:
+            if setting["id"] == "Gamertag":
+                return setting["value"]
+        raise RuntimeError("Gamertag not found in Xbox profile response")
+    except (KeyError, IndexError) as exc:
+        raise RuntimeError(f"Failed to parse Xbox profile response: {exc}") from exc
+
 
 def create_db_and_tables():
     # Because models.py is imported, SQLModel knows about the tables
@@ -84,15 +201,102 @@ def _player_out(db: Session, player: Player) -> PlayerOut:
 
 @app.get("/", response_class=FileResponse)
 async def serve_frontend():
-    """Serves the index.html file directly from the root URL."""
-    # This assumes index.html is in the exact same folder as main.py
-    return FileResponse("index.html")
-
-
-@app.get("/leaderboard", response_class=FileResponse)
-async def serve_leaderboard():
-    """Serves the leaderboard HTML page."""
+    """Serves the leaderboard as the index page."""
     return FileResponse("leaderboard.html")
+
+
+@app.get("/leaderboard")
+async def serve_leaderboard():
+    """Redirects to the leaderboard index page for backwards compatibility."""
+    return RedirectResponse(url="/", status_code=301)
+
+
+# ---------------------------------------------------------------------------
+# Microsoft OAuth endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/auth/microsoft/login")
+async def microsoft_login():
+    """Redirect the user to the Microsoft OAuth2 consent page."""
+    if not AZURE_CLIENT_ID:
+        raise HTTPException(status_code=500, detail="Microsoft OAuth is not configured (missing AZURE_CLIENT_ID).")
+
+    _purge_expired_states()
+    state = secrets.token_urlsafe(32)
+    _oauth_states[state] = time.time()
+
+    redirect_uri = f"{PUBLIC_BASE_URL}/auth/microsoft/callback"
+    params = {
+        "client_id": AZURE_CLIENT_ID,
+        "response_type": "code",
+        "redirect_uri": redirect_uri,
+        "scope": "XboxLive.signin offline_access",
+        "state": state,
+        "response_mode": "query",
+        "prompt": "select_account",
+    }
+    return RedirectResponse(url=f"{_MICROSOFT_AUTH_URL}?{urlencode(params)}")
+
+
+@app.get("/auth/microsoft/callback")
+async def microsoft_callback(
+    code: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    error: Optional[str] = Query(None),
+    error_description: Optional[str] = Query(None),
+):
+    """Handle the OAuth2 callback from Microsoft, fetch the Xbox profile, and upsert the player."""
+    if error:
+        logger.warning("OAuth error from Microsoft: %s – %s", error, error_description)
+        return RedirectResponse(url="/?error=oauth_error")
+
+    if not code or not state:
+        return RedirectResponse(url="/?error=missing_params")
+
+    # --- CSRF state validation ---
+    if state not in _oauth_states:
+        return RedirectResponse(url="/?error=invalid_state")
+    created_at = _oauth_states[state]
+    del _oauth_states[state]
+    if time.time() - created_at > _STATE_TTL:
+        return RedirectResponse(url="/?error=state_expired")
+
+    # --- Xbox token-exchange chain ---
+    try:
+        async with aiohttp.ClientSession() as http:
+            token_data = await _exchange_code_for_token(http, code)
+            ms_access_token = token_data["access_token"]
+
+            xbl_data = await _get_xbl_token(http, ms_access_token)
+            xbl_token = xbl_data["Token"]
+
+            xsts_data = await _get_xsts_token(http, xbl_token)
+            xsts_token = xsts_data["Token"]
+            xuid: str = xsts_data["DisplayClaims"]["xui"][0]["xid"]
+            uhs: str = xsts_data["DisplayClaims"]["xui"][0]["uhs"]
+
+            gamertag = await _get_xbox_gamertag(http, xuid, uhs, xsts_token)
+    except Exception as exc:
+        logger.error("Xbox auth / profile fetch failed: %s", exc)
+        return RedirectResponse(url="/?error=xbox_auth_failed")
+
+    # --- Upsert player ---
+    try:
+        with Session(engine) as db:
+            existing = db.exec(select(Player).where(Player.xuid == xuid)).first()
+            if existing:
+                existing.gamertag = gamertag
+                db.add(existing)
+                db.commit()
+            else:
+                db.add(Player(xuid=xuid, gamertag=gamertag))
+                db.commit()
+    except Exception as exc:
+        logger.error("DB upsert failed for xuid=%s: %s", xuid, exc)
+        return RedirectResponse(url="/?error=db_error")
+
+    return RedirectResponse(url=f"/?added={quote(gamertag)}")
     
 
 @app.post("/players/", response_model=PlayerOut, status_code=201)
