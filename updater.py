@@ -35,6 +35,20 @@ logger = logging.getLogger(__name__)
 UPDATE_INTERVAL_SECONDS: int = int(os.getenv("UPDATE_INTERVAL_SECONDS", "300"))
 """Seconds between full DB update cycles (default: 300 = 5 minutes)."""
 
+INTER_PLAYER_DELAY_SECONDS: float = float(os.getenv("INTER_PLAYER_DELAY_SECONDS", "2"))
+"""Seconds to pause between updating consecutive players (default: 2).
+
+Prevents burst-firing requests when multiple players are in the database,
+which would otherwise exceed the Halo Infinite API rate limit.
+"""
+
+HISTORY_PAGE_DELAY_SECONDS: float = 0.5
+"""Seconds to pause between fetching consecutive pages of match history (0.5s).
+
+Avoids rapid-fire pagination requests that contribute to rate limiting when
+a player has many pages of unprocessed match history.
+"""
+
 # The specific Aim Trainer variant we want to track
 TARGET_ASSET_ID = "ccde9ea1-200d-4017-98be-affc41460bae"
 TARGET_VERSION_ID = "f478dc12-f455-46c5-9d04-fe477dbc88f2"
@@ -195,6 +209,8 @@ async def _update_player(
         if done:
             break
         start += batch_size
+        # Throttle between history pages to avoid bursting the API.
+        await asyncio.sleep(HISTORY_PAGE_DELAY_SECONDS)
 
     if not all_results:
         logger.info("No new matches found for %s.", player.gamertag)
@@ -337,6 +353,8 @@ async def _run_update_cycle(engine) -> None:
                         "Failed to update player %s – continuing with next player.",
                         player.gamertag,
                     )
+                # Pause between players to avoid bursting the Halo API rate limit.
+                await asyncio.sleep(INTER_PLAYER_DELAY_SECONDS)
 
     logger.info(
         "Background update cycle complete. Total new matches stored: %d.", total_new
