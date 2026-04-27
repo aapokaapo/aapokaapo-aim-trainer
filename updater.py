@@ -20,7 +20,7 @@ from haloclient import get_client
 from database import engine
 from models import Player, Match
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 LAST_UPDATE_TIMESTAMP: Optional[datetime] = None
@@ -341,7 +341,7 @@ async def _run_update_cycle(engine) -> None:
     logger.info(
         "Background update cycle complete. Total new matches stored: %d.", total_new
     )
-    LAST_UPDATE_TIMESTAMP = datetime.now()
+    LAST_UPDATE_TIMESTAMP = datetime.now(timezone.utc)
     logger.info("Timestamp updated: %s", LAST_UPDATE_TIMESTAMP)
 
 

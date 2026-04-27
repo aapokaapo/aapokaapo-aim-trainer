@@ -20,7 +20,8 @@ from haloclient import get_client
 from models import Match, Player
 
 import json # Make sure this is imported!
-from updater import start_background_task, _run_update_cycle, _check_if_match_valid, LAST_UPDATE_TIMESTAMP
+import updater
+from updater import start_background_task, _run_update_cycle, _check_if_match_valid
 
 logging.basicConfig(
     level=logging.DEBUG, # Change to DEBUG if you want to see absolutely everything
@@ -220,7 +221,7 @@ async def serve_frontend():
 async def get_system_status():
     """Returns the last time the background worker finished a cycle."""
     return {
-        "last_update": LAST_UPDATE_TIMESTAMP
+        "last_update": updater.LAST_UPDATE_TIMESTAMP
     }
 
 

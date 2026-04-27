@@ -105,6 +105,15 @@
             border-radius: 4px;
             font-size: 0.95em;
         }
+
+        .leaderboard-footer {
+            margin-top: 20px;
+            padding-top: 12px;
+            border-top: 1px solid #333;
+            text-align: center;
+            color: #888;
+            font-size: 0.85em;
+        }
     </style>
 </head>
 <body>
@@ -112,9 +121,6 @@
     <div class="container">
         <div class="header-row">
             <h2>Aim Trainer Leaderboard</h2>
-            <p id="lastUpdated" style="text-align: center; color: #888; font-size: 0.9em; margin-bottom: 20px;">
-                  Last updated: Loading...
-            </p>
             <a href="/auth/microsoft/login" class="btn-add-player">
                 &#43; Register to Leaderboard
             </a>
@@ -154,6 +160,10 @@
             </div>
         </div>
 
+        <footer class="leaderboard-footer">
+            <p id="lastUpdated">Last updated: Loading...</p>
+        </footer>
+
     </div>
 
     <script>
@@ -180,8 +190,8 @@
                     else if (entry.rank === 2) rankStyle = 'class="rank-2"';
                     else if (entry.rank === 3) rankStyle = 'class="rank-3"';
 
-                    // Format the date nicely
-                    const date = new Date(entry.played_at).toLocaleDateString();
+                    // Extract YYYY-MM-DD directly from the ISO string to avoid locale/timezone issues
+                    const date = entry.played_at.slice(0, 10);
 
                     row.innerHTML = `
                         <td ${rankStyle}>#${entry.rank}</td>
@@ -242,21 +252,19 @@
             }
         }
 
-        
         async function loadStatus() {
             try {
                 const response = await fetch('/api/status');
                 const data = await response.json();
                 const statusEl = document.getElementById('lastUpdated');
                 if (data.last_update) {
-                // Format the timestamp nicely
-                const date = new Date(data.last_update);
-                statusEl.innerText = `Last updated: ${date.toLocaleDateString()} at ${date.toLocaleTimeString()}`;
+                    // Extract YYYY-MM-DD directly from the ISO string — stable and locale-independent
+                    statusEl.textContent = `Last updated: ${data.last_update.slice(0, 10)}`;
                 } else {
-                statusEl.innerText = "Last updated: Pending first cycle...";
-            }
+                    statusEl.textContent = 'Last updated: Pending first cycle...';
+                }
             } catch (error) {
-                console.error("Failed to fetch status:", error);
+                console.error('Failed to fetch status:', error);
             }
         }
         
