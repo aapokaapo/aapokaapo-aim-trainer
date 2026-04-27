@@ -13,6 +13,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Path, Query
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlmodel import Session, SQLModel, select
 
 from database import engine
@@ -53,6 +54,18 @@ _XBOX_PROFILE_URL_TEMPLATE = "https://profile.xboxlive.com/users/xuid({xuid})/pr
 # In-memory CSRF state store: state_token -> created_at (unix timestamp)
 _oauth_states: dict[str, float] = {}
 _STATE_TTL = 600  # 10 minutes
+
+# ---------------------------------------------------------------------------
+# Leaderboard TTL cache
+# ---------------------------------------------------------------------------
+
+_leaderboard_cache: dict = {"data": None, "expires_at": 0.0}
+_LEADERBOARD_CACHE_TTL = 60  # seconds — leaderboard is refreshed every 5 min anyway
+
+
+def invalidate_leaderboard_cache() -> None:
+    """Reset the leaderboard TTL cache. Called by the updater after each cycle."""
+    _leaderboard_cache["expires_at"] = 0.0
 
 
 def _purge_expired_states() -> None:
@@ -357,33 +370,48 @@ async def add_player_via_halo_api(request: PlayerSearchRequest):
 
 @app.get("/api/leaderboard", response_model=List[LeaderboardEntry])
 def get_leaderboard():
+    now = time.monotonic()
+    if _leaderboard_cache["data"] is not None and now < _leaderboard_cache["expires_at"]:
+        return _leaderboard_cache["data"]
+
     with Session(engine) as db:
-        # ONLY select matches that have been flagged as valid (>= 100 kills)
-        statement = select(Match, Player).join(Player).where(Match.is_valid == True)
-        results = db.exec(statement).all()
-        # Group by player to find their absolute best time
-        player_bests = {}
-        for match, player in results:
-            gt = player.gamertag
-            # String comparison works safely here because spnkr timedelta strings 
-            # are consistently formatted (e.g. "0:01:23.450" < "0:02:10.000")
-            if gt not in player_bests or match.duration < player_bests[gt].duration:
-                player_bests[gt] = match
+        # Subquery: for each player find their best (minimum) duration among valid matches
+        subq = (
+            select(Match.player_id, func.min(Match.duration).label("best_duration"))
+            .where(Match.is_valid == True)
+            .group_by(Match.player_id)
+            .subquery()
+        )
+        # Tiebreaker: among matches that tie on best duration, pick the one with the lowest id
+        best_ids_subq = (
+            select(func.min(Match.id).label("id"))
+            .join(subq, (Match.player_id == subq.c.player_id) & (Match.duration == subq.c.best_duration))
+            .group_by(Match.player_id)
+            .subquery()
+        )
+        # Fetch those exact matches and their players, ordered fastest first
+        stmt = (
+            select(Match, Player)
+            .join(Player, Match.player_id == Player.id)
+            .where(Match.id.in_(select(best_ids_subq.c.id)))
+            .order_by(Match.duration)
+            .limit(100)
+        )
+        results = db.exec(stmt).all()
 
-        # Sort all players by their best duration (fastest first)
-        sorted_bests = sorted(player_bests.items(), key=lambda x: x[1].duration)
+    leaderboard = [
+        LeaderboardEntry(
+            rank=rank,
+            gamertag=player.gamertag,
+            duration=match.duration,
+            played_at=match.played_at,
+        )
+        for rank, (match, player) in enumerate(results, start=1)
+    ]
 
-        # Build the final leaderboard list
-        leaderboard = []
-        for rank, (gamertag, match) in enumerate(sorted_bests, start=1):
-            leaderboard.append(LeaderboardEntry(
-                rank=rank,
-                gamertag=gamertag,
-                duration=match.duration,
-                played_at=match.played_at
-            ))
-            
-        return leaderboard[:100]
+    _leaderboard_cache["data"] = leaderboard
+    _leaderboard_cache["expires_at"] = now + _LEADERBOARD_CACHE_TTL
+    return leaderboard
 
 @app.get("/players/{gamertag}/history/live")
 async def fetch_live_match_history(gamertag: str):
@@ -429,16 +457,38 @@ async def fetch_live_match_history(gamertag: str):
         )
 
 @app.get("/players/", response_model=list[PlayerOut])
-def get_players():
+def get_players(skip: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=200)):
     with Session(engine) as db:
-        players = db.exec(select(Player)).all()
-        return [_player_out(db, p) for p in players]
+        players = db.exec(select(Player).offset(skip).limit(limit)).all()
+        if not players:
+            return []
+        player_ids = [p.id for p in players]
+        # Single query to fetch all relevant matches
+        all_matches = db.exec(
+            select(Match).where(Match.player_id.in_(player_ids))
+        ).all()
+        matches_by_player: dict[int, list[Match]] = {}
+        for m in all_matches:
+            matches_by_player.setdefault(m.player_id, []).append(m)
+
+        return [
+            PlayerOut(
+                xuid=p.xuid,
+                gamertag=p.gamertag,
+                latest_match_id=p.latest_match_id,
+                matches=[
+                    MatchOut(match_id=m.match_id, duration=m.duration, played_at=m.played_at)
+                    for m in matches_by_player.get(p.id, [])
+                ],
+            )
+            for p in players
+        ]
 
 
 @app.get("/matches/", response_model=list[MatchOut])
-def get_matches():
+def get_matches(skip: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=500)):
     with Session(engine) as db:
-        matches = db.exec(select(Match)).all()
+        matches = db.exec(select(Match).offset(skip).limit(limit)).all()
     return [
         MatchOut(match_id=m.match_id, duration=m.duration, played_at=m.played_at)
         for m in matches
