@@ -1,7 +1,7 @@
 # models.py
 from datetime import datetime
 from typing import Optional
-from sqlmodel import Field, SQLModel, UniqueConstraint
+from sqlmodel import Field, SQLModel
 
 class Player(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -17,12 +17,3 @@ class Match(SQLModel, table=True):
     played_at: datetime
     raw_match_stats: str
     is_valid: bool = Field(default=False, index=True)
-
-class MapCache(SQLModel, table=True):
-    __table_args__ = (UniqueConstraint("asset_id", "version_id"),)
-
-    id: Optional[int] = Field(default=None, primary_key=True)
-    asset_id: str = Field(index=True)
-    version_id: str = Field(index=True)
-    public_name: str
-    admin: str
