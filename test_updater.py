@@ -1,13 +1,13 @@
 """Unit tests for the _check_if_match_valid function in updater.py."""
 
 import pytest
-from updater import _check_if_match_valid, TARGET_ASSET_ID, TARGET_VERSION_ID
+from updater import _check_if_match_valid, TARGET_ASSET_ID, TARGET_VERSION_ID, TARGET_MAP_AUTHOR_XUID
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
 # ---------------------------------------------------------------------------
 
-MAP_AUTHOR_XUID = "xuid(2814672600485177)"
+MAP_AUTHOR_XUID = TARGET_MAP_AUTHOR_XUID
 PLAYER_XUID = "12345678901234567"
 PLAYER_TEAM_ID = 0
 

@@ -53,6 +53,7 @@ a player has many pages of unprocessed match history.
 # The specific Aim Trainer variant we want to track
 TARGET_ASSET_ID = "ccde9ea1-200d-4017-98be-affc41460bae"
 TARGET_VERSION_ID = "f478dc12-f455-46c5-9d04-fe477dbc88f2"
+TARGET_MAP_AUTHOR_XUID = "xuid(2814672600485177)"
 
 # ---------------------------------------------------------------------------
 # Match selection criteria
@@ -100,7 +101,7 @@ def _check_if_match_valid(raw_json: dict, xuid: str, raw_map: dict) -> bool:
         # 2. Check map public name and author XUID
         if raw_map.get("PublicName", "") != "Live Fire - Ranked":
             return False
-        if raw_map.get("Admin", "") != "xuid(2814672600485177)":
+        if raw_map.get("Admin", "") != TARGET_MAP_AUTHOR_XUID:
             return False
 
         # 3. Find the player, their team ID, and their kill count
@@ -131,12 +132,12 @@ def _check_if_match_valid(raw_json: dict, xuid: str, raw_map: dict) -> bool:
         if len(players_on_this_team) > 1:
             return False
 
-        # 5. At least one team must have reached 100 points
-        any_team_100 = any(
+        # 5. At least one team must have reached the 100-point target
+        any_team_reached_target = any(
             ((t.get("Stats") or {}).get("CoreStats") or {}).get("Score", 0) >= 100
             for t in raw_json.get("Teams") or []
         )
-        if not any_team_100:
+        if not any_team_reached_target:
             return False
 
         # 6. Player must have at least 100 kills
