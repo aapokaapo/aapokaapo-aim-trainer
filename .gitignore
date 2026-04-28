@@ -1,6 +1,9 @@
 # Database
 matches.db*
 
+#PyCharm
+.idea/
+
 # Python artifacts
 __pycache__/
 *.py[cod]
