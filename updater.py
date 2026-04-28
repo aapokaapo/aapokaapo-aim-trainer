@@ -79,66 +79,72 @@ def _passes_criteria(match_entry) -> bool:
 
 def _check_if_match_valid(raw_json: dict, xuid: str, raw_map: dict) -> bool:
     """
-    Parses the raw match stats JSON to verify the team reached 100 points 
-    AND the player got at least 100 kills.
+    Parses the raw match stats JSON to verify ALL validity criteria are met:
+
+    1. Game mode (UgcGameVariant) asset_id and version_id match TARGET values.
+    2. Map public name is exactly "Live Fire - Ranked" and the map author XUID matches.
+    3. At least one team has a Score of 100 or more.
+    4. The player recorded at least 100 kills.
+    5. The player was solo – no other players shared the same team.
     """
     target_id = f"xuid({xuid})"
-    
+
     try:
+        # 1. Check game mode IDs
+        ugc_variant = (raw_json.get("MatchInfo") or {}).get("UgcGameVariant") or {}
+        if str(ugc_variant.get("AssetId", "")) != TARGET_ASSET_ID:
+            return False
+        if str(ugc_variant.get("VersionId", "")) != TARGET_VERSION_ID:
+            return False
+
+        # 2. Check map public name and author XUID
+        if raw_map.get("PublicName", "") != "Live Fire - Ranked":
+            return False
+        if raw_map.get("Admin", "") != "xuid(2814672600485177)":
+            return False
+
+        # 3. Find the player, their team ID, and their kill count
         player_team_id = None
         player_kills = 0
-        
-        # 1. Find the player to get their Kills and their TeamId
-        players = raw_json.get("Players", [])
+        players = raw_json.get("Players") or []
 
         for p in players:
-            
-            # Extract whatever the API gave us, convert to lowercase string
             api_player_id = str(p.get("PlayerId", "")).lower()
-            
-            # If the raw XUID numbers exist anywhere inside that string, it's a match!
-            
             if target_id == api_player_id:
-                player_team_stats = p.get("PlayerTeamStats", [])
-                for t in player_team_stats:
+                for t in p.get("PlayerTeamStats") or []:
                     player_team_id = t.get("TeamId")
-                
-                # Get kills and personal score
-                    core_stats = t.get("Stats", {}).get("CoreStats", {})
+                    core_stats = (t.get("Stats") or {}).get("CoreStats") or {}
                     player_kills = core_stats.get("Kills", 0)
                 break
-        # If we couldn't find the player or they have no team, it's invalid
+
+        # Player must be found and assigned to a team
         if player_team_id is None:
             return False
 
+        # 4. Reject if any other player shares the same team (player must be solo)
         players_on_this_team = []
         for p in players:
-            if p.get("PlayerTeamStats", []):
-                for t in player_team_stats:
-                    if t.get("TeamId") == player_team_id:
-                        players_on_this_team.append(p)
+            for t in p.get("PlayerTeamStats") or []:
+                if t.get("TeamId") == player_team_id:
+                    players_on_this_team.append(p)
+                    break
         if len(players_on_this_team) > 1:
             return False
 
-        team_score = 0
-        if player_team_id is not None:
-            for t in raw_json.get("Teams", []):
-                if t.get("TeamId") == player_team_id:
-                    team_score = t.get("Stats", {}).get("CoreStats", {}).get("Score", 0)
-                    break
-            
-                
-        # 3. Check both conditions! 
-        # (Using >= 100 is safer than == 100 just in case a multikill ends the game at 101)
-        if raw_map.get("PublicName", "") != "Live Fire - Ranked" or raw_map.get("Admin", "") != 'xuid(2814672600485177)':
+        # 5. At least one team must have reached 100 points
+        any_team_100 = any(
+            ((t.get("Stats") or {}).get("CoreStats") or {}).get("Score", 0) >= 100
+            for t in raw_json.get("Teams") or []
+        )
+        if not any_team_100:
             return False
-        
-        
-        return team_score >= 100 and player_kills >= 100
-                
+
+        # 6. Player must have at least 100 kills
+        return player_kills >= 100
+
     except Exception as e:
         logger.error(f"Failed to parse match validation: {e}")
-        
+
     return False
 
 
