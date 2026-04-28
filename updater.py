@@ -13,13 +13,12 @@ import os
 from typing import Optional
 
 import aiohttp
-from fastapi import HTTPException
 from sqlmodel import Session, select
 from haloclient import get_client
 
 # Clean, top-level imports! No circular dependency risks.
 from database import engine
-from models import Player, Match, MapCache
+from models import Player, Match
 
 from datetime import datetime, timezone
 
@@ -54,6 +53,19 @@ a player has many pages of unprocessed match history.
 TARGET_ASSET_ID = "ccde9ea1-200d-4017-98be-affc41460bae"
 TARGET_VERSION_ID = "f478dc12-f455-46c5-9d04-fe477dbc88f2"
 
+# The fixed map asset_id for "Live Fire - Ranked"
+LIVE_FIRE_RANKED_MAP_ASSET_ID = "309253f8-7a75-48ff-83e1-e7fb3db2ac47"
+
+
+def is_live_fire_ranked(asset_id: str) -> bool:
+    """Return True if *asset_id* identifies the Live Fire - Ranked map.
+
+    Comparison is case-insensitive to handle any variation in how the Halo API
+    returns the UUID.
+    """
+    return asset_id.lower() == LIVE_FIRE_RANKED_MAP_ASSET_ID
+
+
 # ---------------------------------------------------------------------------
 # Match selection criteria
 # ---------------------------------------------------------------------------
@@ -77,15 +89,11 @@ def _passes_criteria(match_entry) -> bool:
     return True
 
 
-MAP_AUTHOR_XUID = "xuid(2814672600485177)"
-MAP_PUBLIC_NAME = "Live Fire - Ranked"
-
-
-def _check_if_match_valid(raw_json: dict, xuid: str, raw_map: dict) -> bool:
+def _check_if_match_valid(raw_json: dict, xuid: str) -> bool:
     """
     Validates a match against all required criteria:
     1. Game mode: UgcGameVariant asset_id and version_id match TARGET values.
-    2. Map: PublicName is "Live Fire - Ranked" and Admin XUID matches.
+    2. Map: MapVariant asset_id matches the Live Fire - Ranked map.
     3. One team (the player's team) has at least 100 points.
     4. The player has at least 100 kills.
     5. The player was solo (no teammates on their team).
@@ -101,10 +109,10 @@ def _check_if_match_valid(raw_json: dict, xuid: str, raw_map: dict) -> bool:
         if str(ugc_variant.get("VersionId", "")) != TARGET_VERSION_ID:
             return False
 
-        # 2. Verify map public name and author XUID
-        if raw_map.get("PublicName", "") != MAP_PUBLIC_NAME:
-            return False
-        if raw_map.get("Admin", "") != MAP_AUTHOR_XUID:
+        # 2. Verify map via direct asset_id comparison (Live Fire - Ranked)
+        map_variant = match_info.get("MapVariant")
+        map_asset_id = str(map_variant.get("AssetId", "") if isinstance(map_variant, dict) else "")
+        if not is_live_fire_ranked(map_asset_id):
             return False
 
         # 3. Find the player to get their kills and team ID
@@ -188,58 +196,6 @@ async def fetch_with_backoff(func, *args, **kwargs):
 # ---------------------------------------------------------------------------
 # Per-player update
 # ---------------------------------------------------------------------------
-
-async def _fetch_and_cache_map(client, asset_id: str, version_id: str) -> dict:
-    """Fetch map data from the Halo API and persist it in the local DB cache."""
-    map_resp = await fetch_with_backoff(
-        client.discovery_ugc.get_map, asset_id, version_id
-    )
-    raw_map = await map_resp.json()
-    if not raw_map:
-        raise HTTPException(status_code=404, detail="Map not found")
-
-    try:
-        with Session(engine) as db:
-            db.add(MapCache(
-                asset_id=asset_id,
-                version_id=version_id,
-                public_name=raw_map.get("PublicName", ""),
-                admin=raw_map.get("Admin", ""),
-            ))
-            db.commit()
-            logger.debug("Cached map %s/%s ('%s')", asset_id, version_id, raw_map.get("PublicName", ""))
-    except Exception:
-        # Another concurrent request already inserted this map; safe to ignore.
-        logger.debug("Map %s/%s already cached (concurrent insert skipped)", asset_id, version_id)
-
-    return raw_map
-
-
-async def get_or_fetch_map(asset_id: str, version_id: str, client=None) -> dict:
-    """Return map data as a dict, using the DB cache when available.
-
-    On a cache hit the dict is reconstructed from the stored row.
-    On a cache miss the map is fetched from the Halo API, stored in the DB,
-    and the raw API response is returned.  If *client* is ``None`` a temporary
-    aiohttp / Halo client session is opened internally for the API call.
-    """
-    with Session(engine) as db:
-        cached = db.exec(
-            select(MapCache).where(
-                MapCache.asset_id == asset_id,
-                MapCache.version_id == version_id,
-            )
-        ).first()
-        if cached:
-            return {"PublicName": cached.public_name, "Admin": cached.admin}
-
-    # Cache miss – call Halo API
-    if client is not None:
-        return await _fetch_and_cache_map(client, asset_id, version_id)
-
-    async with aiohttp.ClientSession() as http_session:
-        async with get_client(http_session) as new_client:
-            return await _fetch_and_cache_map(new_client, asset_id, version_id)
 
 async def _update_player(
     client,
@@ -367,16 +323,10 @@ async def _update_player(
         )
         raw_json = await stats_resp.json()
         
-        raw_map = await get_or_fetch_map(
-            str(m.match_info.map_variant.asset_id),
-            str(m.match_info.map_variant.version_id),
-            client=client,
-        )
-        
         mid = str(m.match_id)
         
         # 2. Run our validation check
-        is_valid = _check_if_match_valid(raw_json, player.xuid, raw_map)
+        is_valid = _check_if_match_valid(raw_json, player.xuid)
         
         new_matches.append(Match(
             match_id=mid,
