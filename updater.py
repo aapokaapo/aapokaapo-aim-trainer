@@ -19,7 +19,7 @@ from haloclient import get_client
 
 # Clean, top-level imports! No circular dependency risks.
 from database import engine
-from models import Player, Match
+from models import Player, Match, MapCache
 
 from datetime import datetime, timezone
 
@@ -189,26 +189,57 @@ async def fetch_with_backoff(func, *args, **kwargs):
 # Per-player update
 # ---------------------------------------------------------------------------
 
-async def get_raw_map(asset_id, version_id):
+async def _fetch_and_cache_map(client, asset_id: str, version_id: str) -> dict:
+    """Fetch map data from the Halo API and persist it in the local DB cache."""
+    map_resp = await fetch_with_backoff(
+        client.discovery_ugc.get_map, asset_id, version_id
+    )
+    raw_map = await map_resp.json()
+    if not raw_map:
+        raise HTTPException(status_code=404, detail="Map not found")
+
     try:
-        async with aiohttp.ClientSession() as session:
-            async with get_client(session) as client:
-                map_resp = await fetch_with_backoff(
-                    client.discovery_ugc.get_map, asset_id,
-                    version_id
-                )
-                raw_map = await map_resp.json()
-                if not raw_map:
-                    raise HTTPException(
-                        status_code=404,
-                        detail=f"Map not found"
-                    )
+        with Session(engine) as db:
+            db.add(MapCache(
+                asset_id=asset_id,
+                version_id=version_id,
+                public_name=raw_map.get("PublicName", ""),
+                admin=raw_map.get("Admin", ""),
+            ))
+            db.commit()
+            logger.debug("Cached map %s/%s ('%s')", asset_id, version_id, raw_map.get("PublicName", ""))
+    except Exception:
+        # Another concurrent request already inserted this map; safe to ignore.
+        logger.debug("Map %s/%s already cached (concurrent insert skipped)", asset_id, version_id)
 
-                return raw_map
+    return raw_map
 
-    except HTTPException:
-        # Re-raise the 404 so it doesn't get caught by the general Exception block below
-        raise
+
+async def get_or_fetch_map(asset_id: str, version_id: str, client=None) -> dict:
+    """Return map data as a dict, using the DB cache when available.
+
+    On a cache hit the dict is reconstructed from the stored row.
+    On a cache miss the map is fetched from the Halo API, stored in the DB,
+    and the raw API response is returned.  If *client* is ``None`` a temporary
+    aiohttp / Halo client session is opened internally for the API call.
+    """
+    with Session(engine) as db:
+        cached = db.exec(
+            select(MapCache).where(
+                MapCache.asset_id == asset_id,
+                MapCache.version_id == version_id,
+            )
+        ).first()
+        if cached:
+            return {"PublicName": cached.public_name, "Admin": cached.admin}
+
+    # Cache miss – call Halo API
+    if client is not None:
+        return await _fetch_and_cache_map(client, asset_id, version_id)
+
+    async with aiohttp.ClientSession() as http_session:
+        async with get_client(http_session) as new_client:
+            return await _fetch_and_cache_map(new_client, asset_id, version_id)
 
 async def _update_player(
     client,
@@ -336,10 +367,11 @@ async def _update_player(
         )
         raw_json = await stats_resp.json()
         
-        map_resp = await fetch_with_backoff(
-            client.discovery_ugc.get_map, m.match_info.map_variant.asset_id, m.match_info.map_variant.version_id
+        raw_map = await get_or_fetch_map(
+            str(m.match_info.map_variant.asset_id),
+            str(m.match_info.map_variant.version_id),
+            client=client,
         )
-        raw_map = await map_resp.json()
         
         mid = str(m.match_id)
         

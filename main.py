@@ -23,7 +23,7 @@ from models import Match, Player
 
 import json # Make sure this is imported!
 import updater
-from updater import start_background_task, _run_update_cycle, _check_if_match_valid
+from updater import start_background_task, _run_update_cycle, _check_if_match_valid, get_or_fetch_map
 
 logging.basicConfig(
     level=logging.DEBUG, # Change to DEBUG if you want to see absolutely everything
@@ -557,9 +557,9 @@ async def revalidate_all_matches():
                 try:
                     # 1. Parse the stored JSON string back into a Python dictionary
                     raw_json = json.loads(match.raw_match_stats)
-                    asset_id = raw_json.get("MatchInfo", None).get("MapVariant", "").get("AssetId", "")
-                    version_id = raw_json.get("MatchInfo", None).get("MapVariant", "").get("VersionId", "")
-                    raw_map = await updater.get_raw_map(asset_id, version_id)
+                    asset_id = (raw_json.get("MatchInfo") or {}).get("MapVariant", {}).get("AssetId", "")
+                    version_id = (raw_json.get("MatchInfo") or {}).get("MapVariant", {}).get("VersionId", "")
+                    raw_map = await get_or_fetch_map(asset_id, version_id)
 
 
                     # 2. Re-run the validation logic
