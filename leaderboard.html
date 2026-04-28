@@ -42,21 +42,40 @@
             box-sizing: border-box;
             font-size: 16px;
         }
-        
         table {
             width: 100%;
             border-collapse: collapse;
             table-layout: fixed;
         }
+        
         th, td {
             padding: 12px;
             text-align: left;
             border-bottom: 1px solid #333;
-            overflow-wrap: break-word;
-            word-break: break-word;
         }
-        th { background-color: #2a2a2a; }
-        tr:hover { background-color: #333; }
+        
+        th { 
+            background-color: #2a2a2a; 
+        }
+        
+        tr:hover { 
+            background-color: #333; 
+        }
+        
+        /* --- NEW: Define specific column widths --- */
+        th:nth-child(1) { width: 12%; } /* Rank: Small */
+        th:nth-child(2) { width: 43%; } /* Gamertag: Largest */
+        th:nth-child(3) { width: 20%; } /* Best Time */
+        th:nth-child(4) { width: 25%; } /* Date & Time */
+    
+        /* --- NEW: Prevent Gamertag from breaking into multiple lines --- */
+        td:nth-child(2) {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis; /* Adds '...' if the name exceeds the large width */
+        }
+    
+        /* Rank Colors */
         .rank-1 { color: #ffd700; font-weight: bold; } /* Gold */
         .rank-2 { color: #c0c0c0; font-weight: bold; } /* Silver */
         .rank-3 { color: #cd7f32; font-weight: bold; } /* Bronze */
